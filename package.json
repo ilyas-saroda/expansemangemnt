@@ -1,0 +1,26 @@
+{
+  "name": "expense-management-system",
+  "version": "1.0.0",
+  "description": "Full-stack expense management system with Excel import functionality",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "expense",
+    "management",
+    "excel",
+    "import",
+    "dashboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  }
+}

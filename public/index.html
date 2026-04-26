@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Management System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .font-playfair { font-family: 'Playfair Display', serif; }
+        @media print {
+            .no-print { display: none !important; }
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            
+            /* Hide all edit buttons and controls during printing */
+            .btn, button, [onclick*="Edit"], [onclick*="edit"], [id*="Btn"], [id*="edit"], [id*="save"], [id*="cancel"],
+            .flex.justify-between.items-center > div:last-child {
+                display: none !important;
+                visibility: hidden !important;
+            }
+            textarea, input[type="text"], input[type="number"], select {
+                border: none !important;
+                background: transparent !important;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                appearance: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-chart-line"></i>
+                    <h1>Expense Management System</h1>
+                </div>
+                <div class="header-actions">
+                    <div class="sheet-selector">
+                        <label for="sheetSelect" class="sheet-label">Current Sheet:</label>
+                        <select id="sheetSelect" class="sheet-dropdown">
+                            <option value="Expenses">Expenses</option>
+                        </select>
+                    </div>
+                    <button id="addExpenseBtn" class="btn btn-success">
+                        <i class="fas fa-plus"></i>
+                        Add Expense
+                    </button>
+                    <button id="addSheetBtn" class="btn btn-info">
+                        <i class="fas fa-file-excel"></i>
+                        Add Sheet
+                    </button>
+                                        <div class="dropdown">
+                        <button id="exportBtn" class="btn btn-secondary dropdown-toggle">
+                            <i class="fas fa-download"></i>
+                            Export
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div class="dropdown-menu">
+                            <a href="#" class="dropdown-item" onclick="exportToCSV()">
+                                <i class="fas fa-file-csv"></i>
+                                Export as CSV
+                            </a>
+                            <a href="#" class="dropdown-item" onclick="exportToExcel()">
+                                <i class="fas fa-file-excel"></i>
+                                Export as Excel
+                            </a>
+                            <a href="#" class="dropdown-item" onclick="exportToPDF()">
+                                <i class="fas fa-file-pdf"></i>
+                                Export as PDF
+                            </a>
+                            <div class="dropdown-divider"></div>
+                            <a href="#" class="dropdown-item" onclick="printExpenses()">
+                                <i class="fas fa-print"></i>
+                                Print Report
+                            </a>
+                        </div>
+                    </div>
+                                        <button id="refreshBtn" class="btn btn-secondary" style="margin-left: 10px;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button id="importBtn" class="btn btn-primary">
+                        <i class="fas fa-file-excel"></i>
+                        Import Excel
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Statistics Cards -->
+            <section class="stats-section">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-money-bill-wave"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="totalAmount">₹0.00</h3>
+                        <p id="totalAmountInWords" style="font-size: 0.8rem; color: #666; margin-top: 5px;">Zero Rupees</p>
+                        <p>Total Amount</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="paidCount">0</h3>
+                        <p>Paid</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="pendingCount">0</h3>
+                        <p>Pending</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-list"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="totalCount">0</h3>
+                        <p>Total Records</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Search and Filter Section -->
+            <section class="search-section">
+                <div class="search-container">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="searchInput" placeholder="Search expenses...">
+                    </div>
+                    <div class="filter-controls">
+                        <select id="statusFilter" class="filter-select">
+                            <option value="">All Status</option>
+                            <option value="Paid">Paid</option>
+                            <option value="Pending">Pending</option>
+                        </select>
+                        <select id="modeFilter" class="filter-select">
+                            <option value="">All Modes</option>
+                            <option value="Cash">Cash</option>
+                            <option value="Card">Card</option>
+                            <option value="Online">Online</option>
+                            <option value="Cheque">Cheque</option>
+                        </select>
+                        <select id="givenToFilter" class="filter-select">
+                            <option value="">All Persons</option>
+                        </select>
+                        <input type="date" id="dateFilter" class="filter-date">
+                        <button id="clearFilters" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-times"></i>
+                            Clear Filters
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Table Section -->
+            <section class="table-section">
+                <div class="table-header">
+                    <h2>Expense Records</h2>
+                    <div class="table-actions">
+                        <button id="bulkVoucherBtn" class="btn btn-primary" onclick="showBulkVoucherModal()" style="margin-right: 10px;">
+                            <i class="fas fa-receipt"></i>
+                            Bulk Print Vouchers
+                        </button>
+                        <button id="clearBtn" class="btn btn-secondary">
+                            <i class="fas fa-trash"></i>
+                            Clear All
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table id="expenseTable" class="expense-table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllSelections()" title="Select All">
+                                </th>
+                                <th onclick="sortTable('srNo')" style="cursor: pointer; user-select: none;">
+                                    Sr.No <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th onclick="sortTable('date')" style="cursor: pointer; user-select: none;">
+                                    Date <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th onclick="sortTable('givenTo')" style="cursor: pointer; user-select: none;">
+                                    Given To <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th onclick="sortTable('amount')" style="cursor: pointer; user-select: none;">
+                                    Amount <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th>Amount in Words</th>
+                                <th onclick="sortTable('mode')" style="cursor: pointer; user-select: none;">
+                                    Mode <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th>Description</th>
+                                <th onclick="sortTable('fund')" style="cursor: pointer; user-select: none;">
+                                    Fund <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th onclick="sortTable('status')" style="cursor: pointer; user-select: none;">
+                                    Status <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <!-- Dynamic content will be inserted here -->
+                        </tbody>
+                    </table>
+                    
+                    <!-- Empty State -->
+                    <div id="emptyState" class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <h3>No Data Available</h3>
+                        <p>Import an Excel file to view expense records</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Hidden file input -->
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Processing Excel file...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <div class="toast-content">
+            <i class="fas fa-check-circle"></i>
+            <span id="toastMessage">Success!</span>
+        </div>
+    </div>
+
+    <!-- Add Expense Modal -->
+    <div id="addExpenseModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Expense</h3>
+                <button class="modal-close" id="closeAddModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="addExpenseForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="expenseDate">Date *</label>
+                            <input type="date" id="expenseDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="givenTo">Given To *</label>
+                            <div class="dropdown-input">
+                                <input type="text" id="givenTo" placeholder="Enter or select name" required autocomplete="off">
+                                <div class="dropdown-list" id="givenToDropdown"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="amount">Amount (₹) *</label>
+                            <input type="number" id="amount" step="0.01" min="0" placeholder="₹0.00" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="mode">Payment Mode *</label>
+                            <div class="dropdown-input">
+                                <select id="mode" required>
+                                    <option value="">Select Mode</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="Card">Card</option>
+                                    <option value="Online">Online</option>
+                                    <option value="Cheque">Cheque</option>
+                                </select>
+                                <div class="dropdown-list" id="modeDropdown"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="fund">Fund</label>
+                            <div class="dropdown-input">
+                                <input type="text" id="fund" placeholder="Enter or select fund" autocomplete="off">
+                                <div class="dropdown-list" id="fundDropdown"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="status">Status *</label>
+                            <select id="status" required>
+                                <option value="Pending">Pending</option>
+                                <option value="Paid">Paid</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="description">Description</label>
+                            <textarea id="description" rows="3" placeholder="Enter expense description"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <!-- Empty div for layout balance -->
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="addNewExpense()">
+                    <i class="fas fa-save"></i>
+                    Add Expense
+                </button>
+                <button class="btn btn-secondary" id="cancelAddBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voucher Modal -->
+    <div id="voucherModal" class="modal">
+        <div class="modal-content voucher-modal-content">
+            <div class="modal-header">
+                <h3>Expense Voucher</h3>
+                <div class="voucher-actions">
+                    <button class="btn btn-primary btn-sm" id="saveVoucherBtn" onclick="saveVoucherChanges()" style="display: none;">
+                        <i class="fas fa-save"></i>
+                        Save
+                    </button>
+                    <button class="modal-close" id="closeModal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body" id="voucherContent">
+                <!-- Professional voucher template will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="printVoucher()">
+                    <i class="fas fa-print"></i>
+                    Print Voucher
+                </button>
+                <button class="btn btn-info" onclick="exportVoucherAsPDF()">
+                    <i class="fas fa-file-pdf"></i>
+                    Export PDF
+                </button>
+                <button class="btn btn-secondary" id="closeVoucherBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Voucher Selection Modal -->
+    <div id="bulkVoucherModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Bulk Voucher Print</h3>
+                <button class="modal-close" id="closeBulkModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="bulk-selection-container">
+                    <div class="selection-summary">
+                        <p><strong>Total Records:</strong> <span id="totalRecords">0</span></p>
+                        <p><strong>Selected Records:</strong> <span id="selectedRecords">0</span></p>
+                    </div>
+                    
+                    <div class="selection-options">
+                        <h4>Selection Options:</h4>
+                        <div class="option-group">
+                            <button class="btn btn-secondary" onclick="selectAllExpenses()">
+                                <i class="fas fa-check-square"></i>
+                                Select All
+                            </button>
+                            <button class="btn btn-secondary" onclick="deselectAllExpenses()">
+                                <i class="fas fa-square"></i>
+                                Deselect All
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="filter-options">
+                        <h4>Filter by Status:</h4>
+                        <div class="option-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterPaid" onchange="filterByStatus()">
+                                Paid Only
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterPending" onchange="filterByStatus()">
+                                Pending Only
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="date-filter">
+                        <h4>Filter by Date Range:</h4>
+                        <div class="date-range">
+                            <input type="date" id="startDate" class="filter-date" onchange="filterByDate()">
+                            <span>to</span>
+                            <input type="date" id="endDate" class="filter-date" onchange="filterByDate()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="printBulkVouchers()">
+                    <i class="fas fa-print"></i>
+                    Print Selected Vouchers
+                </button>
+                <button class="btn btn-info" onclick="exportBulkVouchersAsPDF()">
+                    <i class="fas fa-file-pdf"></i>
+                    Export as PDF
+                </button>
+                <button class="btn btn-secondary" id="closeBulkVoucherBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Sheet Modal -->
+    <div id="addSheetModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Worksheet</h3>
+                <button class="modal-close" id="closeAddSheetModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="sheetNameInput">Sheet Name:</label>
+                    <input type="text" id="sheetNameInput" class="form-input" placeholder="Enter sheet name..." maxlength="31">
+                    <small class="form-help">Maximum 31 characters. Invalid characters will be replaced with underscores.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="createSheetBtn">
+                    <i class="fas fa-plus"></i>
+                    Create Sheet
+                </button>
+                <button class="btn btn-secondary" id="cancelCreateSheetBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
