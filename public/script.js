@@ -771,6 +771,9 @@ function handleStatusChange(select, index) {
     
     // Auto-save to Excel
     saveExpense(index);
+    
+    // Added: Log status change for debugging
+    console.log(`Status changed for expense ${index}: ${newStatus}`);
 }
 
 // Create status badge HTML
