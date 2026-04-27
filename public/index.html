@@ -52,7 +52,7 @@
                     </div>
                     <button id="addExpenseBtn" class="btn btn-success">
                         <i class="fas fa-plus"></i>
-                        Add Expense
+                        Add Record
                     </button>
                     <button id="addSheetBtn" class="btn btn-info">
                         <i class="fas fa-file-excel"></i>
@@ -188,36 +188,8 @@
                 
                 <div class="table-container">
                     <table id="expenseTable" class="expense-table">
-                        <thead>
-                            <tr>
-                                <th>
-                                    <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllSelections()" title="Select All">
-                                </th>
-                                <th onclick="sortTable('srNo')" style="cursor: pointer; user-select: none;">
-                                    Sr.No <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th onclick="sortTable('date')" style="cursor: pointer; user-select: none;">
-                                    Date <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th onclick="sortTable('givenTo')" style="cursor: pointer; user-select: none;">
-                                    Given To <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th onclick="sortTable('amount')" style="cursor: pointer; user-select: none;">
-                                    Amount <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th>Amount in Words</th>
-                                <th onclick="sortTable('mode')" style="cursor: pointer; user-select: none;">
-                                    Mode <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th>Description</th>
-                                <th onclick="sortTable('fund')" style="cursor: pointer; user-select: none;">
-                                    Fund <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th onclick="sortTable('status')" style="cursor: pointer; user-select: none;">
-                                    Status <i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>
-                                </th>
-                                <th>Actions</th>
-                            </tr>
+                        <thead id="tableHeader">
+                            <!-- Dynamic headers will be inserted here -->
                         </thead>
                         <tbody id="tableBody">
                             <!-- Dynamic content will be inserted here -->
@@ -258,76 +230,39 @@
     <div id="addExpenseModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Add New Expense</h3>
+                <h3 id="addRecordModalTitle">Add New Record</h3>
                 <button class="modal-close" id="closeAddModal">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
+                <div id="noHeadersMessage" class="no-headers-message" style="display: none;">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <h4>No Headers Found</h4>
+                        <p>This sheet doesn't have any headers defined. You have two options:</p>
+                        <div class="header-options">
+                            <button type="button" class="btn btn-primary" onclick="showDefineHeadersModal()">
+                                <i class="fas fa-cog"></i>
+                                Define Headers First
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="useDefaultHeaders()">
+                                <i class="fas fa-list"></i>
+                                Use Default Expense Headers
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <form id="addExpenseForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="expenseDate">Date *</label>
-                            <input type="date" id="expenseDate" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="givenTo">Given To *</label>
-                            <div class="dropdown-input">
-                                <input type="text" id="givenTo" placeholder="Enter or select name" required autocomplete="off">
-                                <div class="dropdown-list" id="givenToDropdown"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="amount">Amount (₹) *</label>
-                            <input type="number" id="amount" step="0.01" min="0" placeholder="₹0.00" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="mode">Payment Mode *</label>
-                            <div class="dropdown-input">
-                                <select id="mode" required>
-                                    <option value="">Select Mode</option>
-                                    <option value="Cash">Cash</option>
-                                    <option value="Card">Card</option>
-                                    <option value="Online">Online</option>
-                                    <option value="Cheque">Cheque</option>
-                                </select>
-                                <div class="dropdown-list" id="modeDropdown"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="fund">Fund</label>
-                            <div class="dropdown-input">
-                                <input type="text" id="fund" placeholder="Enter or select fund" autocomplete="off">
-                                <div class="dropdown-list" id="fundDropdown"></div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="status">Status *</label>
-                            <select id="status" required>
-                                <option value="Pending">Pending</option>
-                                <option value="Paid">Paid</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="description">Description</label>
-                            <textarea id="description" rows="3" placeholder="Enter expense description"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <!-- Empty div for layout balance -->
-                        </div>
+                    <div id="dynamicFormFields">
+                        <!-- Dynamic form fields will be generated here based on sheet headers -->
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" onclick="addNewExpense()">
                     <i class="fas fa-save"></i>
-                    Add Expense
+                    Add Record
                 </button>
                 <button class="btn btn-secondary" id="cancelAddBtn">Cancel</button>
             </div>
@@ -448,6 +383,28 @@
                     <label for="sheetNameInput">Sheet Name:</label>
                     <input type="text" id="sheetNameInput" class="form-input" placeholder="Enter sheet name..." maxlength="31">
                     <small class="form-help">Maximum 31 characters. Invalid characters will be replaced with underscores.</small>
+                </div>
+                
+                <div class="dynamic-fields-section">
+                    <div class="section-header">
+                        <h4>Custom Columns (Optional)</h4>
+                        <small class="form-help">Add custom column headers for your sheet. Leave empty to create a blank sheet.</small>
+                    </div>
+                    
+                    <div id="dynamicFieldsContainer" class="dynamic-fields-container">
+                        <!-- Dynamic fields will be added here -->
+                    </div>
+                    
+                    <div class="field-controls">
+                        <button type="button" id="addFieldBtn" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-plus"></i>
+                            Add Column
+                        </button>
+                        <button type="button" id="clearFieldsBtn" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-times"></i>
+                            Clear All
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">

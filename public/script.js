@@ -9,6 +9,8 @@ let sortOrder = {}; // Track sort order for each column
 let selectedVouchers = new Set(); // Track selected vouchers for bulk operations
 let currentSheet = 'Expenses'; // Track currently selected sheet
 let availableSheets = []; // Track available sheets
+let dynamicFieldCount = 0; // Track dynamic fields count
+let currentSheetHeaders = []; // Track current sheet headers
 
 // DOM elements cache
 const elements = {
@@ -18,6 +20,7 @@ const elements = {
     exportBtn: document.getElementById('exportBtn'),
     fileInput: document.getElementById('fileInput'),
     tableBody: document.getElementById('tableBody'),
+    tableHeader: document.getElementById('tableHeader'),
     emptyState: document.getElementById('emptyState'),
     loadingOverlay: document.getElementById('loadingOverlay'),
     toast: document.getElementById('toast'),
@@ -37,7 +40,7 @@ const elements = {
     dateFilter: document.getElementById('dateFilter'),
     clearFilters: document.getElementById('clearFilters'),
     refreshBtn: document.getElementById('refreshBtn'),
-        bulkVoucherBtn: document.getElementById('bulkVoucherBtn'),
+    bulkVoucherBtn: document.getElementById('bulkVoucherBtn'),
     bulkVoucherModal: document.getElementById('bulkVoucherModal'),
     closeBulkModal: document.getElementById('closeBulkModal'),
     closeBulkVoucherBtn: document.getElementById('closeBulkVoucherBtn'),
@@ -45,7 +48,10 @@ const elements = {
     sheetNameInput: document.getElementById('sheetNameInput'),
     createSheetBtn: document.getElementById('createSheetBtn'),
     cancelCreateSheetBtn: document.getElementById('cancelCreateSheetBtn'),
-    sheetSelect: document.getElementById('sheetSelect')
+    sheetSelect: document.getElementById('sheetSelect'),
+    addFieldBtn: document.getElementById('addFieldBtn'),
+    clearFieldsBtn: document.getElementById('clearFieldsBtn'),
+    dynamicFieldsContainer: document.getElementById('dynamicFieldsContainer')
 };
 
 // Initialize event listeners - simplified
@@ -75,6 +81,8 @@ function initializeEventListeners() {
         elements.addSheetModal?.classList.remove('active');
     });
     elements.createSheetBtn?.addEventListener('click', createNewSheet);
+    elements.addFieldBtn?.addEventListener('click', addDynamicField);
+    elements.clearFieldsBtn?.addEventListener('click', clearDynamicFields);
         elements.bulkVoucherBtn?.addEventListener('click', showBulkVoucherModal);
     
     // Bulk voucher modal listeners
@@ -253,6 +261,67 @@ function refreshData() {
     loadExistingData();
 }
 
+// Dynamic Fields Management
+function addDynamicField() {
+    dynamicFieldCount++;
+    const fieldId = `field-${dynamicFieldCount}`;
+    
+    const fieldItem = document.createElement('div');
+    fieldItem.className = 'dynamic-field-item';
+    fieldItem.id = fieldId;
+    
+    fieldItem.innerHTML = `
+        <span class="field-number">${dynamicFieldCount}</span>
+        <input type="text" placeholder="Enter column name..." class="field-input" id="input-${fieldId}">
+        <button type="button" class="remove-field-btn" onclick="removeDynamicField('${fieldId}')">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    
+    elements.dynamicFieldsContainer.appendChild(fieldItem);
+    
+    // Focus on the new input
+    document.getElementById(`input-${fieldId}`).focus();
+}
+
+function removeDynamicField(fieldId) {
+    const fieldItem = document.getElementById(fieldId);
+    if (fieldItem) {
+        fieldItem.remove();
+        updateFieldNumbers();
+    }
+}
+
+function clearDynamicFields() {
+    elements.dynamicFieldsContainer.innerHTML = '';
+    dynamicFieldCount = 0;
+}
+
+function updateFieldNumbers() {
+    const fieldItems = elements.dynamicFieldsContainer.querySelectorAll('.dynamic-field-item');
+    fieldItems.forEach((item, index) => {
+        const numberSpan = item.querySelector('.field-number');
+        if (numberSpan) {
+            numberSpan.textContent = index + 1;
+        }
+    });
+    dynamicFieldCount = fieldItems.length;
+}
+
+function getDynamicFieldValues() {
+    const fieldInputs = elements.dynamicFieldsContainer.querySelectorAll('.field-input');
+    const values = [];
+    
+    fieldInputs.forEach(input => {
+        const value = input.value.trim();
+        if (value) {
+            values.push(value);
+        }
+    });
+    
+    return values;
+}
+
 // Table sorting function
 function sortTable(column) {
     const dataToSort = filteredData.length > 0 ? filteredData : expenseData;
@@ -329,6 +398,7 @@ async function loadExistingData() {
         
         if (result.success) {
             expenseData = result.data || [];
+            currentSheetHeaders = result.headers || [];
             
             // Update available sheets
             if (result.availableSheets) {
@@ -343,8 +413,7 @@ async function loadExistingData() {
             
             renderTable();
             updateStatistics();
-            populateGivenToFilter();
-            populateModeFilter();
+            updateFilters();
             
             showToast(`Loaded ${result.data.length} records from "${currentSheet}"`, 'success');
         } else {
@@ -407,17 +476,83 @@ function populateModeFilter() {
     const uniqueModes = getUniqueValues('mode');
     
     // Clear existing options except the first one
-    if (elements.modeFilter) {
-        elements.modeFilter.innerHTML = '<option value="">All Modes</option>';
+    const modeFilter = document.getElementById('modeFilter');
+    if (modeFilter) {
+        // Keep only the first option (All Modes)
+        while (modeFilter.children.length > 1) {
+            modeFilter.removeChild(modeFilter.lastChild);
+        }
         
-        // Add unique modes to dropdown
+        // Add unique modes
         uniqueModes.forEach(mode => {
-            const option = document.createElement('option');
-            option.value = mode;
-            option.textContent = mode;
-            elements.modeFilter.appendChild(option);
+            if (mode && mode.trim()) {
+                const option = document.createElement('option');
+                option.value = mode;
+                option.textContent = mode;
+                modeFilter.appendChild(option);
+            }
         });
     }
+}
+
+// Update filters dynamically based on current sheet headers
+function updateFilters() {
+    if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
+        // Use default filters for expense sheet
+        populateModeFilter();
+        populateGivenToFilter();
+        return;
+    }
+    
+    // Clear all filter dropdowns except the first option
+    const filterElements = ['statusFilter', 'modeFilter', 'givenToFilter'];
+    filterElements.forEach(filterId => {
+        const filter = document.getElementById(filterId);
+        if (filter) {
+            while (filter.children.length > 1) {
+                filter.removeChild(filter.lastChild);
+            }
+        }
+    });
+    
+    // Populate filters based on available headers
+    currentSheetHeaders.forEach(header => {
+        if (header.toLowerCase().includes('status')) {
+            populateFilterFromHeader('statusFilter', header);
+        } else if (header.toLowerCase().includes('mode')) {
+            populateFilterFromHeader('modeFilter', header);
+        } else if (header.toLowerCase().includes('given') || header.toLowerCase().includes('to')) {
+            populateFilterFromHeader('givenToFilter', header);
+        }
+    });
+    
+    // Default to expense filters if no matching headers found
+    if (currentSheetHeaders.includes('Status') || currentSheetHeaders.includes('status')) {
+        populateFilterFromHeader('statusFilter', 'Status');
+    }
+    if (currentSheetHeaders.includes('Mode') || currentSheetHeaders.includes('mode')) {
+        populateFilterFromHeader('modeFilter', 'Mode');
+    }
+    if (currentSheetHeaders.includes('Given To') || currentSheetHeaders.includes('givenTo')) {
+        populateFilterFromHeader('givenToFilter', 'Given To');
+    }
+}
+
+// Populate filter from specific header
+function populateFilterFromHeader(filterId, header) {
+    const filter = document.getElementById(filterId);
+    if (!filter) return;
+    
+    const uniqueValues = getUniqueValues(header);
+    
+    uniqueValues.forEach(value => {
+        if (value && value.trim()) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            filter.appendChild(option);
+        }
+    });
 }
 
 // Get unique values from expense data
@@ -609,9 +744,10 @@ async function handleFileUpload(event) {
     // Show loading overlay
     showLoading();
 
-    // Create FormData
+    // Create FormData with current sheet
     const formData = new FormData();
     formData.append('excelFile', file);
+    formData.append('sheetName', currentSheet);
 
     try {
         // Send file to server
@@ -623,10 +759,12 @@ async function handleFileUpload(event) {
         const result = await response.json();
 
         if (response.ok && result.success) {
-            // Success - update table with data
+            // Success - update headers and table with data
+            currentSheetHeaders = result.headers || [];
             expenseData = result.data;
             renderTable();
             updateStatistics();
+            updateFilters();
             showToast(result.message || 'Excel file imported successfully!', 'success');
         } else {
             // Error from server
@@ -653,43 +791,96 @@ function renderTable() {
 
     hideEmptyState();
     
+    // Generate dynamic headers
+    generateTableHeaders();
+    
     // Clear existing table content
-    tableBody.innerHTML = '';
+    elements.tableBody.innerHTML = '';
 
     // Add rows for each expense
     dataToRender.forEach((expense, index) => {
         const originalIndex = expenseData.findIndex(exp => exp.srNo === expense.srNo);
-        const row = createTableRow(expense, originalIndex);
-        tableBody.appendChild(row);
+        const row = createDynamicTableRow(expense, originalIndex);
+        elements.tableBody.appendChild(row);
     });
 }
 
-// Create table row element
-function createTableRow(expense, index) {
-    const amount = parseFloat(expense.amount || 0);
-    const amountInWords = numberToWords(amount);
+// Generate dynamic table headers
+function generateTableHeaders() {
+    const headers = currentSheetHeaders.length > 0 ? currentSheetHeaders : ['Sr No', 'Date', 'Given To', 'Amount', 'Mode', 'Description', 'Fund', 'Status'];
     
+    let headerHTML = '<tr><th><input type="checkbox" id="selectAllCheckbox" onchange="toggleAllSelections()" title="Select All"></th>';
+    
+    headers.forEach(header => {
+        const isSortable = ['Sr No', 'Date', 'Given To', 'Amount', 'Mode', 'Fund', 'Status'].includes(header);
+        const sortIcon = isSortable ? '<i class="fas fa-sort" style="margin-left: 5px; font-size: 0.8em;"></i>' : '';
+        const onclickAttr = isSortable ? `onclick="sortTable('${header}')" style="cursor: pointer; user-select: none;"` : '';
+        
+        headerHTML += `<th ${onclickAttr}>${header} ${sortIcon}</th>`;
+    });
+    
+    // Add Amount in Words column if Amount exists
+    if (headers.includes('Amount')) {
+        const amountIndex = headers.indexOf('Amount');
+        headers.splice(amountIndex + 1, 0, 'Amount in Words');
+    }
+    
+    headerHTML += '<th>Actions</th></tr>';
+    
+    elements.tableHeader.innerHTML = headerHTML;
+}
+
+// Create dynamic table row element
+function createDynamicTableRow(expense, index) {
+    const headers = currentSheetHeaders.length > 0 ? currentSheetHeaders : ['Sr No', 'Date', 'Given To', 'Amount', 'Mode', 'Description', 'Fund', 'Status'];
     const row = document.createElement('tr');
-    row.innerHTML = `
-        <td>
-            <input type="checkbox" class="voucher-checkbox" data-srno="${expense.srNo}" onchange="toggleVoucherSelection(${expense.srNo})">
-        </td>
-        <td>${expense.srNo || index + 1}</td>
-        <td contenteditable="true" data-field="date" data-index="${index}">${formatDate(expense.date)}</td>
-        <td contenteditable="true" data-field="givenTo" data-index="${index}">${expense.givenTo || '-'}</td>
-        <td contenteditable="true" data-field="amount" data-index="${index}">${formatCurrency(amount)}</td>
-        <td>${amountInWords}</td>
-        <td contenteditable="true" data-field="mode" data-index="${index}">${expense.mode || '-'}</td>
-        <td contenteditable="true" data-field="description" data-index="${index}">${expense.description || '-'}</td>
-        <td contenteditable="true" data-field="fund" data-index="${index}">${expense.fund || '-'}</td>
-        <td>${createEditableStatusBadge(expense.status, index)}</td>
-        <td>${createActionButtons(expense, index)}</td>
-    `;
+    
+    // Use a unique identifier for the row
+    const rowId = expense['Sr No'] || expense.srNo || index + 1;
+    
+    let rowHTML = '<td><input type="checkbox" class="voucher-checkbox" data-srno="' + rowId + '" onchange="toggleVoucherSelection(' + rowId + ')"></td>';
+    
+    headers.forEach(header => {
+        let cellContent = '';
+        let cellAttributes = '';
+        
+        if (header === 'Sr No') {
+            cellContent = expense[header] || rowId;
+        } else if (header === 'Amount') {
+            const amount = parseFloat(expense[header] || 0);
+            cellContent = formatCurrency(amount);
+            cellAttributes = 'contenteditable="true" data-field="' + header + '" data-index="' + index + '"';
+        } else if (header === 'Amount in Words') {
+            const amount = parseFloat(expense['Amount'] || expense['amount'] || 0);
+            cellContent = numberToWords(amount);
+        } else if (header === 'Status') {
+            cellContent = createEditableStatusBadge(expense[header] || 'Pending', index);
+        } else if (header === 'Date') {
+            cellContent = formatDate(expense[header]) || '-';
+            cellAttributes = 'contenteditable="true" data-field="' + header + '" data-index="' + index + '"';
+        } else {
+            cellContent = expense[header] || '-';
+            cellAttributes = 'contenteditable="true" data-field="' + header + '" data-index="' + index + '"';
+        }
+        
+        rowHTML += '<td ' + cellAttributes + '>' + cellContent + '</td>';
+    });
+    
+    rowHTML += '<td>' + createActionButtons(expense, index) + '</td>';
+    row.innerHTML = rowHTML;
+    
+    // Store the unique row identifier
+    row.dataset.rowId = rowId;
     
     // Add event listeners for inline editing
     addInlineEditListeners(row);
     
     return row;
+}
+
+// Create table row element (legacy function for compatibility)
+function createTableRow(expense, index) {
+    return createDynamicTableRow(expense, index);
 }
 
 // Create editable status badge
@@ -738,33 +929,86 @@ function handleInlineEdit(cell) {
     const field = cell.dataset.field;
     let newValue = cell.textContent.trim();
     
+    // Get the actual row identifier (srNo or unique ID)
+    const rowData = expenseData[index];
+    if (!rowData) {
+        console.error('Row data not found for index:', index);
+        return;
+    }
+    
     // Special handling for amount field
-    if (field === 'amount') {
+    if (field.toLowerCase().includes('amount')) {
         newValue = newValue.replace('₹', '').replace(/,/g, '').trim();
         if (isNaN(newValue) || parseFloat(newValue) <= 0) {
             showToast('Please enter a valid amount', 'error');
             // Restore original value
-            cell.textContent = formatCurrency(parseFloat(expenseData[index].amount || 0));
+            const originalValue = rowData[field] || rowData['Amount'] || 0;
+            cell.textContent = formatCurrency(parseFloat(originalValue));
             return;
         }
         // Update the amount in words column in the same row
         const row = cell.parentElement;
-        const amountInWordsCell = row.cells[4]; // Amount in Words column
-        amountInWordsCell.textContent = numberToWords(parseFloat(newValue));
+        const cells = row.cells;
+        for (let i = 0; i < cells.length; i++) {
+            const cellHeader = currentSheetHeaders[i - 1]; // -1 because first column is checkbox
+            if (cellHeader && cellHeader.toLowerCase().includes('amount') && cellHeader.toLowerCase().includes('words')) {
+                cells[i].textContent = numberToWords(parseFloat(newValue));
+                break;
+            }
+        }
     }
     
-    // Update data
-    expenseData[index][field] = newValue;
+    // Update data with proper field mapping
+    const actualField = mapFieldToActualColumn(field);
+    expenseData[index][actualField] = newValue;
     
-  
     // Auto-save to Excel
     saveExpense(index);
+}
+
+// Map frontend field name to actual column name
+function mapFieldToActualColumn(field) {
+    // For dynamic sheets, the field name should match the header
+    if (currentSheetHeaders && currentSheetHeaders.length > 0) {
+        // Find matching header (case-insensitive)
+        const matchingHeader = currentSheetHeaders.find(header => 
+            header.toLowerCase() === field.toLowerCase() ||
+            header.toLowerCase().replace(/\s+/g, '') === field.toLowerCase()
+        );
+        
+        if (matchingHeader) {
+            return matchingHeader;
+        }
+    }
+    
+    // Fallback to common field mappings
+    const fieldMappings = {
+        'srNo': 'Sr No',
+        'date': 'Date',
+        'givenTo': 'Given To',
+        'amount': 'Amount',
+        'mode': 'Mode',
+        'description': 'Description',
+        'fund': 'Fund',
+        'status': 'Status'
+    };
+    
+    return fieldMappings[field] || field;
 }
 
 // Handle status change
 function handleStatusChange(select, index) {
     const newStatus = select.value;
-    expenseData[index].status = newStatus;
+    const rowData = expenseData[index];
+    
+    if (!rowData) {
+        console.error('Row data not found for index:', index);
+        return;
+    }
+    
+    // Find the actual status field name in the current sheet
+    const statusField = mapFieldToActualColumn('status');
+    expenseData[index][statusField] = newStatus;
     
     // Update badge styling
     select.className = `status-badge ${newStatus === 'Paid' ? 'status-paid' : 'status-pending'}`;
@@ -772,8 +1016,8 @@ function handleStatusChange(select, index) {
     // Auto-save to Excel
     saveExpense(index);
     
-    // Added: Log status change for debugging
-    console.log(`Status changed for expense ${index}: ${newStatus}`);
+    // Log status change for debugging
+    console.log(`Status changed for row ${index} (${statusField}): ${newStatus}`);
 }
 
 // Create status badge HTML
@@ -817,22 +1061,33 @@ function formatDate(dateString) {
     }
 }
 
-// Save expense and sync with Excel
+// Save expense and sync with Excel (targeted row update)
 async function saveExpense(index) {
     try {
         const expense = expenseData[index];
         
+        if (!expense) {
+            console.error('Expense data not found for index:', index);
+            showToast('Error: Expense data not found', 'error');
+            return;
+        }
+        
         showLoading('Saving expense and updating Excel...');
         
-        // Call server to update data
-        const response = await fetch('/update', {
+        // Calculate the actual row index in Excel (index + 2 because: index 0 = row 2 in Excel)
+        const excelRowIndex = index + 2;
+        
+        // Call server to update specific row
+        const response = await fetch('/update-row', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 sheetName: currentSheet,
-                updatedData: expenseData
+                rowIndex: excelRowIndex,
+                rowData: expense,
+                uniqueId: expense['Sr No'] || expense.srNo || index + 1
             })
         });
         
@@ -840,7 +1095,7 @@ async function saveExpense(index) {
         
         if (result.success) {
             showToast('Expense saved and Excel file updated!', 'success');
-            console.log('Saved expense:', expense);
+            console.log('Saved expense at row', excelRowIndex, ':', expense);
             
             // Smart Synchronization: Update bulk voucher data automatically
             synchronizeBulkVoucherData(expense, index);
@@ -1425,17 +1680,34 @@ function closeVoucherModal() {
     isVoucherEditMode = false;
 }
 
-// Delete expense and sync with Excel
+// Delete expense and sync with Excel (targeted row deletion)
 async function deleteExpense(index) {
     if (confirm('Are you sure you want to delete this expense record?')) {
         try {
             const expenseToDelete = expenseData[index];
             
+            if (!expenseToDelete) {
+                console.error('Expense data not found for index:', index);
+                showToast('Error: Expense data not found', 'error');
+                return;
+            }
+            
             showLoading('Deleting expense and updating Excel...');
             
-            // Call server to delete expense
-            const response = await fetch(`/delete/${expenseToDelete.srNo}`, {
-                method: 'DELETE'
+            // Calculate the actual row index in Excel (index + 2 because: index 0 = row 2 in Excel)
+            const excelRowIndex = index + 2;
+            
+            // Call server to delete specific row
+            const response = await fetch('/delete-row', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    sheetName: currentSheet,
+                    rowIndex: excelRowIndex,
+                    uniqueId: expenseToDelete['Sr No'] || expenseToDelete.srNo || index + 1
+                })
             });
             
             const result = await response.json();
@@ -1444,12 +1716,12 @@ async function deleteExpense(index) {
                 // Remove from local data
                 expenseData.splice(index, 1);
                 
-                // Re-render table with updated data
+                // Re-render table and update statistics
                 renderTable();
                 updateStatistics();
                 
                 showToast('Expense deleted and Excel file updated!', 'success');
-                console.log('Deleted expense:', expenseToDelete);
+                console.log('Deleted expense at row', excelRowIndex, ':', expenseToDelete);
             } else {
                 showToast('Failed to delete expense', 'error');
                 console.error('Delete error:', result.error);
@@ -2020,26 +2292,159 @@ function hideAllDropdowns() {
     });
 }
 
-// Add Expense Modal Functions
+// Add Expense Modal Functions (Dynamic)
 function openAddExpenseModal() {
-    // Set today's date as default
-    document.getElementById('expenseDate').value = new Date().toISOString().split('T')[0];
-    addExpenseModal.classList.add('active');
+    const modalTitle = document.getElementById('addRecordModalTitle');
+    const noHeadersMessage = document.getElementById('noHeadersMessage');
+    const dynamicFormFields = document.getElementById('dynamicFormFields');
     
-    // Initialize dropdowns with current data
-    setTimeout(() => initializeDropdowns(), 100);
+    // Update modal title based on current sheet
+    modalTitle.textContent = `Add New Record to "${currentSheet}"`;
+    
+    // Check if sheet has headers
+    if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
+        // Show no headers message
+        noHeadersMessage.style.display = 'block';
+        dynamicFormFields.style.display = 'none';
+    } else {
+        // Hide no headers message and generate dynamic form
+        noHeadersMessage.style.display = 'none';
+        dynamicFormFields.style.display = 'block';
+        generateDynamicForm();
+    }
+    
+    addExpenseModal.classList.add('active');
 }
 
 function closeAddExpenseModal() {
     addExpenseModal.classList.remove('active');
-    // Reset form and hide dropdowns
+    // Reset form
     document.getElementById('addExpenseForm').reset();
     hideAllDropdowns();
+}
+
+// Generate dynamic form fields based on current sheet headers
+function generateDynamicForm() {
+    const dynamicFormFields = document.getElementById('dynamicFormFields');
+    dynamicFormFields.innerHTML = '';
+    
+    // Skip Sr No as it's auto-generated
+    const headersToInclude = currentSheetHeaders.filter(header => 
+        header !== 'Sr No' && header !== 'srNo'
+    );
+    
+    headersToInclude.forEach((header, index) => {
+        const formRow = document.createElement('div');
+        formRow.className = 'form-row';
+        
+        const formGroup = document.createElement('div');
+        formGroup.className = 'form-group';
+        
+        const label = document.createElement('label');
+        label.setAttribute('for', `field_${index}`);
+        label.textContent = header;
+        
+        // Add required indicator for essential fields
+        const isRequired = ['Date', 'date', 'Given To', 'givenTo', 'Amount', 'amount', 'Status', 'status'].some(
+            required => header.toLowerCase().includes(required.toLowerCase())
+        );
+        if (isRequired) {
+            label.innerHTML += ' *';
+        }
+        
+        let input;
+        const headerLower = header.toLowerCase();
+        
+        if (headerLower.includes('date')) {
+            // Date picker for date fields
+            input = document.createElement('input');
+            input.type = 'date';
+            input.id = `field_${index}`;
+            if (isRequired) input.required = true;
+            // Set today's date as default
+            input.value = new Date().toISOString().split('T')[0];
+        } else if (headerLower.includes('status')) {
+            // Dropdown for status fields
+            input = document.createElement('select');
+            input.id = `field_${index}`;
+            if (isRequired) input.required = true;
+            
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = `Select ${header}`;
+            input.appendChild(defaultOption);
+            
+            // Add common status options
+            const statusOptions = ['Pending', 'Paid', 'Completed', 'In Progress', 'Cancelled'];
+            statusOptions.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option;
+                optionElement.textContent = option;
+                input.appendChild(optionElement);
+            });
+        } else if (headerLower.includes('amount') || headerLower.includes('price')) {
+            // Number input for amount fields
+            input = document.createElement('input');
+            input.type = 'number';
+            input.id = `field_${index}`;
+            input.step = '0.01';
+            input.min = '0';
+            input.placeholder = '0.00';
+            if (isRequired) input.required = true;
+        } else if (headerLower.includes('description') || headerLower.includes('notes') || headerLower.includes('remarks')) {
+            // Textarea for description fields
+            input = document.createElement('textarea');
+            input.id = `field_${index}`;
+            input.rows = '3';
+            input.placeholder = `Enter ${header}`;
+        } else {
+            // Text input for other fields
+            input = document.createElement('input');
+            input.type = 'text';
+            input.id = `field_${index}`;
+            input.placeholder = `Enter ${header}`;
+            if (isRequired) input.required = true;
+            
+            // Add autocomplete for common fields
+            if (headerLower.includes('given') || headerLower.includes('person') || headerLower.includes('name')) {
+                input.autocomplete = 'off';
+            }
+        }
+        
+        // Store the header name as a data attribute
+        input.setAttribute('data-header', header);
+        
+        formGroup.appendChild(label);
+        formGroup.appendChild(input);
+        formRow.appendChild(formGroup);
+        dynamicFormFields.appendChild(formRow);
+    });
+}
+
+// Handle no headers situation
+function showDefineHeadersModal() {
+    // Close current modal and open add sheet modal
+    closeAddExpenseModal();
+    openAddSheetModal();
+    showToast('Please define headers for this sheet first', 'info');
+}
+
+function useDefaultHeaders() {
+    // Use default expense headers
+    currentSheetHeaders = ['Sr No', 'Date', 'Given To', 'Amount', 'Mode', 'Description', 'Fund', 'Status'];
+    
+    // Hide no headers message and generate form
+    document.getElementById('noHeadersMessage').style.display = 'none';
+    document.getElementById('dynamicFormFields').style.display = 'block';
+    generateDynamicForm();
+    
+    showToast('Using default expense headers', 'success');
 }
 
 // Add Sheet Modal Functions
 function openAddSheetModal() {
     elements.sheetNameInput.value = '';
+    clearDynamicFields();
     elements.addSheetModal.classList.add('active');
     elements.sheetNameInput.focus();
 }
@@ -2047,6 +2452,7 @@ function openAddSheetModal() {
 async function createNewSheet() {
     try {
         const sheetName = elements.sheetNameInput.value.trim();
+        const customHeaders = getDynamicFieldValues();
         
         if (!sheetName) {
             showToast('Please enter a sheet name', 'error');
@@ -2061,7 +2467,10 @@ async function createNewSheet() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ sheetName })
+            body: JSON.stringify({ 
+                sheetName,
+                customHeaders: customHeaders.length > 0 ? customHeaders : null
+            })
         });
         
         const result = await response.json();
@@ -2070,6 +2479,7 @@ async function createNewSheet() {
             showToast(`Sheet "${result.sheet.name}" created successfully!`, 'success');
             elements.addSheetModal.classList.remove('active');
             elements.sheetNameInput.value = '';
+            clearDynamicFields();
             
             // Optional: Refresh data to show updated sheets
             setTimeout(() => {
@@ -2088,38 +2498,77 @@ async function createNewSheet() {
 
 async function addNewExpense() {
     try {
-        // Get form values
-        const expenseData = {
-            sheetName: currentSheet,
-            date: document.getElementById('expenseDate').value,
-            givenTo: document.getElementById('givenTo').value.trim(),
-            amount: parseFloat(document.getElementById('amount').value).toFixed(2),
-            mode: document.getElementById('mode').value,
-            description: document.getElementById('description').value.trim(),
-            fund: document.getElementById('fund').value.trim(),
-            status: document.getElementById('status').value
-        };
+        // Check if we have headers
+        if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
+            showToast('Please define headers for this sheet first', 'error');
+            return;
+        }
+        
+        // Collect data from dynamic form fields
+        const formData = {};
+        const formInputs = document.querySelectorAll('#dynamicFormFields input, #dynamicFormFields select, #dynamicFormFields textarea');
+        
+        let hasRequiredFieldErrors = false;
+        const requiredFields = [];
+        
+        formInputs.forEach(input => {
+            const header = input.getAttribute('data-header');
+            if (!header) return;
+            
+            let value = input.value.trim();
+            
+            // Special handling for different input types
+            if (input.type === 'number') {
+                value = parseFloat(value) || 0;
+                if (header.toLowerCase().includes('amount') || header.toLowerCase().includes('price')) {
+                    value = value.toFixed(2);
+                }
+            } else if (input.type === 'date') {
+                value = value || new Date().toISOString().split('T')[0];
+            }
+            
+            formData[header] = value;
+            
+            // Check for required fields
+            const isRequired = ['Date', 'date', 'Given To', 'givenTo', 'Amount', 'amount', 'Status', 'status'].some(
+                required => header.toLowerCase().includes(required.toLowerCase())
+            );
+            
+            if (isRequired && !value) {
+                hasRequiredFieldErrors = true;
+                requiredFields.push(header);
+            }
+            
+            // Validate amount fields
+            if ((header.toLowerCase().includes('amount') || header.toLowerCase().includes('price')) && 
+                (isNaN(value) || parseFloat(value) <= 0)) {
+                hasRequiredFieldErrors = true;
+                requiredFields.push(`${header} (must be a valid positive number)`);
+            }
+        });
         
         // Validation
-        if (!expenseData.date || !expenseData.givenTo || !expenseData.amount || !expenseData.mode) {
-            showToast('Please fill all required fields', 'error');
+        if (hasRequiredFieldErrors) {
+            showToast(`Please fill required fields: ${requiredFields.join(', ')}`, 'error');
             return;
         }
         
-        if (isNaN(expenseData.amount) || parseFloat(expenseData.amount) <= 0) {
-            showToast('Please enter a valid amount', 'error');
-            return;
-        }
+        // Add auto-generated Sr No
+        const nextSrNo = (expenseData.length || 0) + 1;
+        formData['Sr No'] = nextSrNo;
         
-        showLoading('Adding expense and updating Excel...');
+        showLoading('Adding record and updating Excel...');
         
-        // Send to server
-        const response = await fetch('/add-expense', {
+        // Send to server with dynamic data
+        const response = await fetch('/add-record', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(expenseData)
+            body: JSON.stringify({
+                sheetName: currentSheet,
+                recordData: formData
+            })
         });
         
         const result = await response.json();
@@ -2131,16 +2580,17 @@ async function addNewExpense() {
             // Reload data from server to get updated list
             await loadExistingData();
             
-            // Clear filters to show new expense
+            // Clear filters to show new record
             clearAllFilters();
             
-            showToast(`Expense added successfully to sheet "${currentSheet}"!`, 'success');
+            showToast(`Record added successfully to sheet "${currentSheet}"!`, 'success');
         } else {
-            showToast(result.error || 'Failed to add expense', 'error');
+            showToast('Failed to add record', 'error');
+            console.error('Add error:', result.error);
         }
     } catch (error) {
-        console.error('Error adding expense:', error);
-        showToast('Error adding expense', 'error');
+        console.error('Error adding record:', error);
+        showToast('Error adding record', 'error');
     } finally {
         hideLoading();
     }

@@ -216,48 +216,130 @@ function saveToJSON(expenses) {
 }
 
 // Route to handle Excel file upload
-app.post('/upload-excel', upload.single('excelFile'), (req, res) => {
+app.post('/upload-excel', upload.single('excelFile'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    const { sheetName = 'Expenses' } = req.body;
     const filePath = req.file.path;
     
     // Read the Excel file
     const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    const sourceSheetName = workbook.SheetNames[0];
+    const sourceWorksheet = workbook.Sheets[sourceSheetName];
     
-    // Convert to JSON
-    const data = xlsx.utils.sheet_to_json(worksheet);
+    // Get the range to determine if first row is headers
+    const range = xlsx.utils.decode_range(sourceWorksheet['!ref'] || 'A1:A1');
+    const hasHeaders = range.s.r < range.e.r; // If there's more than one row, assume first is headers
+    
+    let processedData;
+    let headers = [];
+    
+    if (hasHeaders) {
+      // Read first row as headers
+      const headerData = xlsx.utils.sheet_to_json(sourceWorksheet, { header: 1, range: 0 });
+      headers = headerData[0] || [];
+      
+      // Read data rows starting from second row
+      const dataRows = xlsx.utils.sheet_to_json(sourceWorksheet, { header: headers, range: 1 });
+      
+      // Process data dynamically based on headers
+      processedData = dataRows.map((row, index) => {
+        const processedRow = { srNo: index + 1 };
+        
+        headers.forEach(header => {
+          if (header && header.trim()) {
+            const key = header.trim();
+            let value = row[key] || '';
+            
+            // Special formatting for common fields
+            if (key.toLowerCase().includes('date') && value) {
+              value = formatExcelDate(value);
+            } else if (key.toLowerCase().includes('amount') || key.toLowerCase().includes('price')) {
+              value = parseFloat(value || 0).toFixed(2);
+            }
+            
+            processedRow[key] = value;
+          }
+        });
+        
+        return processedRow;
+      });
+    } else {
+      // No headers - use default expense structure
+      const data = xlsx.utils.sheet_to_json(sourceWorksheet);
+      processedData = data.map((row, index) => ({
+        srNo: index + 1,
+        date: formatExcelDate(row.Date || row.date || new Date()),
+        givenTo: row['Given To'] || row.givenTo || row['Given to'] || '',
+        amount: parseFloat(row.Amount || row.amount || 0).toFixed(2),
+        mode: row.Mode || row.mode || '',
+        description: row.Description || row.description || '',
+        fund: row.Fund || row.fund || '',
+        status: row.Status || row.status || 'Pending'
+      }));
+      
+      headers = ['Sr No', 'Date', 'Given To', 'Amount', 'Mode', 'Description', 'Fund', 'Status'];
+    }
     
     // Delete the uploaded file after processing
     fs.unlinkSync(filePath);
     
-    // Process data to ensure proper format
-    const processedData = data.map((row, index) => ({
-      srNo: index + 1,
-      date: formatExcelDate(row.Date || row.date),
-      givenTo: row['Given To'] || row.givenTo || row['Given to'] || '',
-      amount: parseFloat(row.Amount || row.amount || 0).toFixed(2),
-      mode: row.Mode || row.mode || '',
-      description: row.Description || row.description || '',
-      fund: row.Fund || row.fund || '',
-      status: row.Status || row.status || 'Pending'
-    }));
+    // Load the main workbook to import to specific sheet
+    let mainWorkbook;
+    if (fs.existsSync(EXCEL_FILE)) {
+      mainWorkbook = new ExcelJS.Workbook();
+      await mainWorkbook.xlsx.readFile(EXCEL_FILE);
+    } else {
+      mainWorkbook = new ExcelJS.Workbook();
+      mainWorkbook.addWorksheet('Expenses');
+    }
     
-    // Update global data
-    currentExpenses = processedData;
+    // Get or create the target worksheet
+    let targetWorksheet = mainWorkbook.getWorksheet(sheetName);
+    if (!targetWorksheet) {
+      targetWorksheet = mainWorkbook.addWorksheet(sheetName);
+    }
     
-    // Create Excel file and save to JSON
-    createExcelFile(processedData);
-    saveToJSON(processedData);
+    // Clear existing data (keep headers if they exist)
+    targetWorksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        targetWorksheet.spliceRows(rowNumber, 1);
+      }
+    });
+    
+    // Add headers if sheet is empty or has different structure
+    if (targetWorksheet.rowCount <= 1) {
+      const headerColumns = headers.map(header => ({
+        header: header,
+        key: header.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+        width: 15
+      }));
+      targetWorksheet.columns = headerColumns;
+    }
+    
+    // Add processed data to the worksheet
+    processedData.forEach(row => {
+      const rowData = headers.map(header => row[header] || '');
+      targetWorksheet.addRow(rowData);
+    });
+    
+    // Save the workbook
+    await mainWorkbook.xlsx.writeFile(EXCEL_FILE);
+    
+    // Update global data if it's the current sheet
+    if (sheetName === currentSheet) {
+      currentExpenses = processedData;
+    }
     
     res.json({
       success: true,
       data: processedData,
-      message: `Successfully imported ${processedData.length} records and created Excel file: ${EXCEL_FILE}`
+      headers: headers,
+      sheetName: sheetName,
+      message: `Successfully imported ${processedData.length} records to sheet "${sheetName}"`
     });
     
   } catch (error) {
@@ -307,6 +389,7 @@ app.get('/data', async (req, res) => {
     const selectedSheet = sheetName || 'Expenses';
     
     let data = [];
+    let headers = [];
     
     if (fs.existsSync(EXCEL_FILE)) {
       const workbook = new ExcelJS.Workbook();
@@ -314,19 +397,25 @@ app.get('/data', async (req, res) => {
       
       const worksheet = workbook.getWorksheet(selectedSheet);
       if (worksheet) {
+        // Get headers from the first row
+        headers = [];
+        const headerRow = worksheet.getRow(1);
+        headerRow.eachCell((cell, colNumber) => {
+          headers.push(cell.value || `Column${colNumber}`);
+        });
+        
+        // Read data rows dynamically based on headers
         data = [];
         worksheet.eachRow((row, rowNumber) => {
           if (rowNumber > 1) { // Skip header row
-            data.push({
-              srNo: row.getCell(1).value || rowNumber - 1,
-              date: row.getCell(2).value || '',
-              givenTo: row.getCell(3).value || '',
-              amount: row.getCell(4).value || '0.00',
-              mode: row.getCell(5).value || '',
-              description: row.getCell(6).value || '',
-              fund: row.getCell(7).value || '',
-              status: row.getCell(8).value || 'Pending'
+            const rowData = { srNo: rowNumber - 1 };
+            
+            headers.forEach((header, colIndex) => {
+              const cellValue = row.getCell(colIndex + 1).value;
+              rowData[header] = cellValue || '';
             });
+            
+            data.push(rowData);
           }
         });
       }
@@ -335,6 +424,7 @@ app.get('/data', async (req, res) => {
     res.json({
       success: true,
       data: data,
+      headers: headers,
       count: data.length,
       currentSheet: selectedSheet,
       availableSheets: availableSheets
@@ -347,7 +437,80 @@ app.get('/data', async (req, res) => {
   }
 });
 
-// POST /update - Update expense data for specific sheet
+// POST /update-row - Update a specific row in a sheet (targeted update)
+app.post('/update-row', async (req, res) => {
+  try {
+    const { sheetName = 'Expenses', rowIndex, rowData, uniqueId } = req.body;
+    
+    if (!rowIndex || rowIndex < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid row index. Row index must be >= 2 (row 1 is headers)'
+      });
+    }
+    
+    if (!fs.existsSync(EXCEL_FILE)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Excel file not found'
+      });
+    }
+
+    // Load the existing workbook with ExcelJS to preserve all sheets
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(EXCEL_FILE);
+    
+    // Get the target worksheet
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) {
+      return res.status(404).json({
+        success: false,
+        error: `Sheet "${sheetName}" not found`
+      });
+    }
+
+    // Get headers from the first row dynamically
+    const headers = [];
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      headers.push(cell.value || `Column${colNumber}`);
+    });
+
+    // Get the specific row to update
+    const targetRow = worksheet.getRow(rowIndex);
+    if (!targetRow) {
+      return res.status(404).json({
+        success: false,
+        error: `Row ${rowIndex} not found in sheet "${sheetName}"`
+      });
+    }
+
+    // Update the specific row with new data
+    headers.forEach((header, colIndex) => {
+      const cellValue = rowData[header] || rowData[header.toLowerCase()] || '';
+      targetRow.getCell(colIndex + 1).value = cellValue;
+    });
+
+    // Save the workbook
+    await workbook.xlsx.writeFile(EXCEL_FILE);
+    
+    res.json({
+      success: true,
+      message: `Successfully updated row ${rowIndex} in sheet "${sheetName}"`,
+      sheetName: sheetName,
+      rowIndex: rowIndex,
+      headers: headers
+    });
+  } catch (error) {
+    console.error('Error updating row:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update row: ' + error.message
+    });
+  }
+});
+
+// POST /update - Update expense data for specific sheet (legacy - for bulk operations)
 app.post('/update', async (req, res) => {
   try {
     const { sheetName = 'Expenses', updatedData } = req.body;
@@ -379,6 +542,13 @@ app.post('/update', async (req, res) => {
       });
     }
 
+    // Get headers from the first row dynamically
+    const headers = [];
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      headers.push(cell.value || `Column${colNumber}`);
+    });
+
     // Clear existing data in the worksheet (except headers)
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) { // Keep header row, remove data rows
@@ -386,18 +556,23 @@ app.post('/update', async (req, res) => {
       }
     });
 
-    // Add updated data back to the worksheet
+    // Add updated data back to the worksheet dynamically
     updatedData.forEach(expense => {
-      worksheet.addRow([
-        expense.srNo,
-        expense.date || new Date().toISOString().split('T')[0],
-        expense.givenTo || '',
-        expense.amount || '0.00',
-        expense.mode || '',
-        expense.description || '',
-        expense.fund || '',
-        expense.status || 'Pending'
-      ]);
+      const rowData = headers.map(header => {
+        // Handle special fields with fallbacks
+        if (header === 'Sr No' || header === 'srNo') {
+          return expense.srNo || expense[header] || '';
+        } else if (header === 'Date' || header === 'date') {
+          return expense.date || expense[header] || new Date().toISOString().split('T')[0];
+        } else if (header === 'Amount' || header === 'amount') {
+          return expense.amount || expense[header] || '0.00';
+        } else if (header === 'Status' || header === 'status') {
+          return expense.status || expense[header] || 'Pending';
+        } else {
+          return expense[header] || '';
+        }
+      });
+      worksheet.addRow(rowData);
     });
 
     // Save the workbook - this preserves all other sheets
@@ -412,7 +587,8 @@ app.post('/update', async (req, res) => {
       success: true,
       message: `Successfully updated ${updatedData.length} records in sheet "${sheetName}"`,
       sheetName: sheetName,
-      recordsUpdated: updatedData.length
+      recordsUpdated: updatedData.length,
+      headers: headers
     });
   } catch (error) {
     console.error('Error updating data:', error);
@@ -423,10 +599,17 @@ app.post('/update', async (req, res) => {
   }
 });
 
-// POST /add-expense - Add single expense
-app.post('/add-expense', async (req, res) => {
+// POST /add-record - Add a dynamic record to any sheet
+app.post('/add-record', async (req, res) => {
   try {
-    const { sheetName = 'Expenses', ...newExpense } = req.body;
+    const { sheetName = 'Expenses', recordData } = req.body;
+    
+    if (!recordData || typeof recordData !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid record data. Expected object with field values'
+      });
+    }
     
     if (!fs.existsSync(EXCEL_FILE)) {
       return res.status(404).json({
@@ -446,49 +629,113 @@ app.post('/add-expense', async (req, res) => {
       });
     }
 
-    // Get the next serial number
-    let nextSrNo = 1;
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber > 1) { // Skip header row
-        const srNo = row.getCell(1).value;
-        if (srNo && srNo >= nextSrNo) {
-          nextSrNo = srNo + 1;
-        }
-      }
+    // Get headers from the first row dynamically
+    const headers = [];
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      headers.push(cell.value || `Column${colNumber}`);
     });
 
-    // Add the new expense to the worksheet
-    newExpense.srNo = nextSrNo;
-    worksheet.addRow([
-      newExpense.srNo,
-      newExpense.date || new Date().toISOString().split('T')[0],
-      newExpense.givenTo || '',
-      newExpense.amount || '0.00',
-      newExpense.mode || '',
-      newExpense.description || '',
-      newExpense.fund || '',
-      newExpense.status || 'Pending'
-    ]);
+    // Create row data in the same order as headers
+    const rowData = headers.map(header => {
+      const value = recordData[header] || recordData[header.toLowerCase()] || '';
+      
+      // Special handling for different field types
+      if (header.toLowerCase().includes('amount') || header.toLowerCase().includes('price')) {
+        return parseFloat(value) || 0;
+      } else if (header.toLowerCase().includes('date')) {
+        return value || new Date().toISOString().split('T')[0];
+      } else if (header.toLowerCase().includes('status')) {
+        return value || 'Pending';
+      }
+      
+      return value;
+    });
+
+    // Add new row with dynamic data
+    worksheet.addRow(rowData);
 
     // Save the workbook
     await workbook.xlsx.writeFile(EXCEL_FILE);
     
     res.json({
       success: true,
-      data: newExpense,
-      message: `Expense added to sheet "${sheetName}"`,
-      sheetName: sheetName
+      message: `Record added successfully to sheet "${sheetName}"`,
+      recordData: recordData,
+      headers: headers
     });
   } catch (error) {
-    console.error('Error adding expense:', error);
+    console.error('Error adding record:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to add expense: ' + error.message
+      error: 'Failed to add record: ' + error.message
     });
   }
 });
 
-// DELETE /delete/:srNo - Delete expense
+// DELETE /delete-row - Delete a specific row in a sheet (targeted deletion)
+app.delete('/delete-row', async (req, res) => {
+  try {
+    const { sheetName = 'Expenses', rowIndex, uniqueId } = req.body;
+    
+    if (!rowIndex || rowIndex < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid row index. Row index must be >= 2 (row 1 is headers)'
+      });
+    }
+    
+    if (!fs.existsSync(EXCEL_FILE)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Excel file not found'
+      });
+    }
+
+    // Load the existing workbook with ExcelJS to preserve all sheets
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(EXCEL_FILE);
+    
+    // Get the target worksheet
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) {
+      return res.status(404).json({
+        success: false,
+        error: `Sheet "${sheetName}" not found`
+      });
+    }
+
+    // Check if the row exists
+    const targetRow = worksheet.getRow(rowIndex);
+    if (!targetRow || targetRow.number > worksheet.rowCount) {
+      return res.status(404).json({
+        success: false,
+        error: `Row ${rowIndex} not found in sheet "${sheetName}"`
+      });
+    }
+
+    // Delete the specific row using spliceRows
+    worksheet.spliceRows(rowIndex, 1);
+
+    // Save the workbook with proper file lock handling
+    await workbook.xlsx.writeFile(EXCEL_FILE);
+    
+    res.json({
+      success: true,
+      message: `Successfully deleted row ${rowIndex} from sheet "${sheetName}"`,
+      sheetName: sheetName,
+      rowIndex: rowIndex
+    });
+  } catch (error) {
+    console.error('Error deleting row:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete row: ' + error.message
+    });
+  }
+});
+
+// DELETE /delete/:srNo - Delete expense (legacy - for compatibility)
 app.delete('/delete/:srNo', (req, res) => {
   try {
     const srNo = parseInt(req.params.srNo);
@@ -768,7 +1015,7 @@ app.post('/sheets/:sheetName/data', (req, res) => {
 // API endpoint for adding new worksheet using exceljs
 app.post('/api/add-sheet', async (req, res) => {
   try {
-    const { sheetName } = req.body;
+    const { sheetName, customHeaders } = req.body;
     
     if (!sheetName || sheetName.trim() === '') {
       return res.status(400).json({
@@ -809,17 +1056,31 @@ app.post('/api/add-sheet', async (req, res) => {
     // Add new worksheet
     const newWorksheet = workbook.addWorksheet(sanitizedSheetName);
     
+    // Determine headers to use
+    let headers = [];
+    if (customHeaders && Array.isArray(customHeaders) && customHeaders.length > 0) {
+      // Use custom headers provided by user
+      headers = customHeaders.map(header => ({
+        header: header,
+        key: header.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+        width: 15
+      }));
+    } else {
+      // Use default expense headers
+      headers = [
+        { header: 'Sr No', key: 'srNo', width: 10 },
+        { header: 'Date', key: 'date', width: 15 },
+        { header: 'Given To', key: 'givenTo', width: 20 },
+        { header: 'Amount', key: 'amount', width: 15 },
+        { header: 'Mode', key: 'mode', width: 15 },
+        { header: 'Description', key: 'description', width: 30 },
+        { header: 'Fund', key: 'fund', width: 15 },
+        { header: 'Status', key: 'status', width: 15 }
+      ];
+    }
+
     // Add headers to the new sheet
-    newWorksheet.columns = [
-      { header: 'Sr No', key: 'srNo', width: 10 },
-      { header: 'Date', key: 'date', width: 15 },
-      { header: 'Given To', key: 'givenTo', width: 20 },
-      { header: 'Amount', key: 'amount', width: 15 },
-      { header: 'Mode', key: 'mode', width: 15 },
-      { header: 'Description', key: 'description', width: 30 },
-      { header: 'Fund', key: 'fund', width: 15 },
-      { header: 'Status', key: 'status', width: 15 }
-    ];
+    newWorksheet.columns = headers;
 
     // Save the workbook
     await workbook.xlsx.writeFile(EXCEL_FILE);
@@ -830,7 +1091,9 @@ app.post('/api/add-sheet', async (req, res) => {
       sheet: {
         name: sanitizedSheetName,
         createdAt: new Date().toISOString(),
-        totalSheets: workbook.worksheets.length
+        totalSheets: workbook.worksheets.length,
+        headers: headers.map(h => h.header),
+        hasCustomHeaders: customHeaders && customHeaders.length > 0
       }
     });
 
