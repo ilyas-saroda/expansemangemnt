@@ -714,11 +714,26 @@ async function fetchUniqueValuesForColumns(columns, sheetName = currentSheet) {
 // Store unique values for current sheet
 let currentSheetUniqueValues = {};
 
-// Load unique values for autocomplete fields
+// Load unique values for autocomplete fields - Enhanced for sheet-aware dynamic columns
 async function loadUniqueValuesForAutocomplete() {
-    const columns = ['givenTo', 'mode', 'fund', 'status'];
-    currentSheetUniqueValues = await fetchUniqueValuesForColumns(columns, currentSheet);
-    console.log('Loaded unique values for autocomplete:', currentSheetUniqueValues);
+    try {
+        // Get all unique columns from current sheet headers
+        const columnsToLoad = currentSheetHeaders.length > 0 
+            ? currentSheetHeaders.filter(header => header !== 'Sr No' && header !== 'srNo')
+            : ['givenTo', 'mode', 'fund', 'status']; // Fallback to default columns
+            
+        // Load unique values for all columns in the current sheet
+        currentSheetUniqueValues = await fetchUniqueValuesForColumns(columnsToLoad, currentSheet);
+        console.log(`Loaded unique values for ${columnsToLoad.length} columns from sheet "${currentSheet}":`, currentSheetUniqueValues);
+        
+        // Also refresh all sheets data for cross-sheet suggestions
+        await loadAllSheetsData();
+        
+    } catch (error) {
+        console.error('Error loading unique values for autocomplete:', error);
+        // Initialize with empty object to prevent errors
+        currentSheetUniqueValues = {};
+    }
 }
 
 // Get unique values from all sheets data (for cross-sheet suggestions)
@@ -736,8 +751,8 @@ function getUniqueValues(field) {
     return Array.from(values).sort();
 }
 
-// Autocomplete functionality
-function createAutocomplete(input, field) {
+// Enhanced Autocomplete functionality with sheet-aware unique values
+function createEnhancedAutocomplete(input, fieldMapping, actualHeader) {
     const container = document.createElement('div');
     container.className = 'autocomplete-container';
     input.parentNode.insertBefore(container, input);
@@ -750,17 +765,101 @@ function createAutocomplete(input, field) {
     container.appendChild(suggestionsDiv);
     
     let currentFocus = -1;
+    let allSuggestions = [];
+    let isLoading = false;
+    
+    // Load unique values for this specific field from current sheet
+    async function loadSheetSpecificValues() {
+        if (isLoading) return;
+        
+        try {
+            isLoading = true;
+            showLoadingIndicator();
+            
+            // Try to get sheet-specific unique values first
+            const response = await fetch(`/unique-values?sheetName=${encodeURIComponent(currentSheet)}&columns=${encodeURIComponent(actualHeader)}`);
+            const result = await response.json();
+            
+            if (result.success && result.uniqueValues && result.uniqueValues[actualHeader]) {
+                allSuggestions = result.uniqueValues[actualHeader];
+                console.log(`Loaded ${allSuggestions.length} unique values for "${actualHeader}" from sheet "${currentSheet}"`);
+            } else {
+                // Fallback to cross-sheet data if no sheet-specific data found
+                allSuggestions = getCrossSheetSuggestions(fieldMapping);
+                console.log(`Using cross-sheet suggestions for "${actualHeader}"`);
+            }
+        } catch (error) {
+            console.error('Error loading sheet-specific values:', error);
+            // Fallback to cross-sheet data
+            allSuggestions = getCrossSheetSuggestions(fieldMapping);
+        } finally {
+            isLoading = false;
+            hideLoadingIndicator();
+        }
+    }
+    
+    // Get cross-sheet suggestions as fallback
+    function getCrossSheetSuggestions(field) {
+        const values = new Set();
+        
+        // Use all sheets data if available, otherwise fall back to current sheet data
+        const dataSource = allSheetsData.length > 0 ? allSheetsData : expenseData;
+        
+        dataSource.forEach(expense => {
+            // Try multiple field names for flexibility
+            const fieldValue = expense[field] || expense[actualHeader] || expense[actualHeader.toLowerCase()];
+            if (fieldValue && fieldValue.toString().trim() !== '') {
+                values.add(fieldValue.toString().trim());
+            }
+        });
+        
+        return Array.from(values).sort();
+    }
+    
+    function showLoadingIndicator() {
+        suggestionsDiv.innerHTML = '<div class="autocomplete-loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+        suggestionsDiv.style.display = 'block';
+    }
+    
+    function hideLoadingIndicator() {
+        const loadingIndicator = suggestionsDiv.querySelector('.autocomplete-loading');
+        if (loadingIndicator) {
+            loadingIndicator.remove();
+        }
+    }
     
     // Show all suggestions on focus
-    function showAllSuggestions() {
+    async function showAllSuggestions() {
         const value = input.value.toLowerCase().trim();
         suggestionsDiv.innerHTML = '';
         currentFocus = -1;
         
-        const suggestions = getSuggestions(field, value);
-        if (suggestions.length > 0) {
+        // Load values if not already loaded
+        if (allSuggestions.length === 0 && !isLoading) {
+            await loadSheetSpecificValues();
+        }
+        
+        // Filter suggestions based on input
+        let filteredSuggestions = allSuggestions;
+        if (value && value.trim() !== '') {
+            filteredSuggestions = allSuggestions.filter(suggestion => 
+                suggestion.toLowerCase().includes(value)
+            );
+        }
+        
+        if (filteredSuggestions.length > 0) {
             suggestionsDiv.style.display = 'block';
-            suggestions.forEach((suggestion, index) => {
+            
+            // Performance optimization: Use document fragment for large lists
+            const fragment = document.createDocumentFragment();
+            
+            // Show all matching suggestions without limit, but optimize rendering
+            const maxVisibleItems = 50; // Show max 50 items for performance
+            const itemsToShow = filteredSuggestions.length > maxVisibleItems 
+                ? filteredSuggestions.slice(0, maxVisibleItems) 
+                : filteredSuggestions;
+            
+            itemsToShow.forEach((suggestion, index) => {
                 const item = document.createElement('div');
                 item.className = 'autocomplete-suggestion';
                 item.innerHTML = highlightMatch(suggestion, value);
@@ -769,8 +868,47 @@ function createAutocomplete(input, field) {
                     suggestionsDiv.style.display = 'none';
                     input.focus();
                 });
-                suggestionsDiv.appendChild(item);
+                fragment.appendChild(item);
             });
+            
+            // Add "show more" indicator if there are more items
+            if (filteredSuggestions.length > maxVisibleItems) {
+                const showMoreItem = document.createElement('div');
+                showMoreItem.className = 'autocomplete-suggestion show-more';
+                showMoreItem.innerHTML = `<i class="fas fa-ellipsis-h"></i> ${filteredSuggestions.length - maxVisibleItems} more items...`;
+                showMoreItem.style.fontStyle = 'italic';
+                showMoreItem.style.color = '#6c757d';
+                showMoreItem.style.pointerEvents = 'none';
+                fragment.appendChild(showMoreItem);
+            }
+            
+            suggestionsDiv.appendChild(fragment);
+            
+            // Add "Add new value" option if input doesn't match exactly
+            if (value && !filteredSuggestions.includes(value)) {
+                const addNewItem = document.createElement('div');
+                addNewItem.className = 'autocomplete-suggestion add-new';
+                addNewItem.innerHTML = `<i class="fas fa-plus"></i> Add "${value}" as new value`;
+                addNewItem.addEventListener('click', function() {
+                    // User can keep their typed value
+                    suggestionsDiv.style.display = 'none';
+                    input.focus();
+                });
+                suggestionsDiv.appendChild(addNewItem);
+            }
+        } else if (value && value.trim() !== '') {
+            // Show option to add new value if no matches found
+            suggestionsDiv.style.display = 'block';
+            const addNewItem = document.createElement('div');
+            addNewItem.className = 'autocomplete-suggestion add-new';
+            addNewItem.innerHTML = `<i class="fas fa-plus"></i> Add "${value}" as new value`;
+            addNewItem.addEventListener('click', function() {
+                suggestionsDiv.style.display = 'none';
+                input.focus();
+            });
+            suggestionsDiv.appendChild(addNewItem);
+        } else {
+            suggestionsDiv.style.display = 'none';
         }
     }
     
@@ -785,9 +923,13 @@ function createAutocomplete(input, field) {
         showAllSuggestions();
     });
     
-    // Input event handler - filter suggestions
+    // Debounced input event handler for performance
+    let debounceTimer;
     input.addEventListener('input', function() {
-        showAllSuggestions();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            showAllSuggestions();
+        }, 150); // 150ms debounce for better performance
     });
     
     // Keyboard navigation
@@ -829,6 +971,14 @@ function createAutocomplete(input, field) {
             item.classList.remove('selected');
         }
     }
+    
+    // Load initial values when autocomplete is created
+    loadSheetSpecificValues();
+}
+
+// Legacy autocomplete function for backward compatibility
+function createAutocomplete(input, field) {
+    return createEnhancedAutocomplete(input, field, field);
 }
 
 function getSuggestions(field, query) {
@@ -2625,13 +2775,16 @@ function hideAllDropdowns() {
 }
 
 // Add Expense Modal Functions (Dynamic)
-function openAddExpenseModal() {
+async function openAddExpenseModal() {
     const modalTitle = document.getElementById('addRecordModalTitle');
     const noHeadersMessage = document.getElementById('noHeadersMessage');
     const dynamicFormFields = document.getElementById('dynamicFormFields');
     
     // Update modal title based on current sheet
     modalTitle.textContent = `Add New Record to "${currentSheet}"`;
+    
+    // Load unique values for the current sheet before opening modal
+    await loadUniqueValuesForAutocomplete();
     
     // Check if sheet has headers
     if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
@@ -2736,17 +2889,31 @@ function generateDynamicForm() {
         formRow.appendChild(formGroup);
         dynamicFormFields.appendChild(formRow);
         
-        // Add autocomplete for specific fields
+        // Add autocomplete for ALL fields to make them searchable dropdowns
         setTimeout(() => {
-            if (headerLower.includes('given') || headerLower.includes('person') || headerLower.includes('name')) {
-                createAutocomplete(input, 'givenTo');
+            // Create field mapping for sheet-aware suggestions
+            let fieldMapping = header; // Use exact header name first
+            
+            // Map common variations to standard field names
+            if (headerLower.includes('given') || headerLower.includes('person') || headerLower.includes('name') || headerLower.includes('to')) {
+                fieldMapping = 'givenTo';
             } else if (headerLower.includes('mode')) {
-                createAutocomplete(input, 'mode');
+                fieldMapping = 'mode';
             } else if (headerLower.includes('fund')) {
-                createAutocomplete(input, 'fund');
+                fieldMapping = 'fund';
             } else if (headerLower.includes('status')) {
-                // Apply autocomplete to status field as well
-                createAutocomplete(input, 'status');
+                fieldMapping = 'status';
+            } else if (headerLower.includes('description') || headerLower.includes('notes') || headerLower.includes('remarks')) {
+                fieldMapping = 'description';
+            } else if (headerLower.includes('amount') || headerLower.includes('price') || headerLower.includes('cost')) {
+                fieldMapping = 'amount';
+            } else if (headerLower.includes('date')) {
+                fieldMapping = 'date';
+            }
+            
+            // Apply autocomplete to all fields (except date fields which use date picker)
+            if (!headerLower.includes('date')) {
+                createEnhancedAutocomplete(input, fieldMapping, header);
             }
         }, 100);
     });
@@ -2812,9 +2979,16 @@ async function createNewSheet() {
             elements.sheetNameInput.value = '';
             clearDynamicFields();
             
-            // Optional: Refresh data to show updated sheets
-            setTimeout(() => {
-                refreshData();
+            // Automatic Synchronization: Switch to new sheet and load its unique values
+            currentSheet = result.sheet.name;
+            currentSheetHeaders = result.sheet.headers || [];
+            
+            // Refresh data and load unique values for the new sheet
+            setTimeout(async () => {
+                await refreshData();
+                // Load unique values specifically for the new sheet
+                await loadUniqueValuesForAutocomplete();
+                showToast(`Now working on sheet "${result.sheet.name}" with ${currentSheetHeaders.length} columns`, 'info');
             }, 1000);
         } else {
             showToast(result.error || 'Failed to create sheet', 'error');

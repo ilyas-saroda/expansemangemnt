@@ -1200,6 +1200,164 @@ app.post('/delete-sheet', async (req, res) => {
   }
 });
 
+// GET /unique-values - Extract unique values from specific columns in a sheet
+app.get('/unique-values', async (req, res) => {
+  try {
+    const { sheetName = 'Expenses', columns } = req.query;
+    
+    if (!columns) {
+      return res.status(400).json({
+        success: false,
+        error: 'Columns parameter is required'
+      });
+    }
+    
+    // Parse columns from comma-separated string
+    const columnArray = columns.split(',').map(col => col.trim());
+    
+    if (!fs.existsSync(EXCEL_FILE)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Excel file not found'
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(EXCEL_FILE);
+    
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) {
+      return res.status(404).json({
+        success: false,
+        error: `Sheet "${sheetName}" not found`
+      });
+    }
+
+    // Get headers from the first row
+    const headers = [];
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      headers.push(cell.value || `Column${colNumber}`);
+    });
+
+    // Extract unique values for each requested column
+    const uniqueValues = {};
+    
+    columnArray.forEach(requestedColumn => {
+      const columnIndex = headers.findIndex(header => 
+        header && header.toString().toLowerCase() === requestedColumn.toLowerCase()
+      );
+      
+      if (columnIndex !== -1) {
+        const values = new Set();
+        
+        // Iterate through all data rows (skip header row)
+        worksheet.eachRow((row, rowNumber) => {
+          if (rowNumber > 1) { // Skip header row
+            const cellValue = row.getCell(columnIndex + 1).value;
+            if (cellValue && cellValue.toString().trim() !== '') {
+              values.add(cellValue.toString().trim());
+            }
+          }
+        });
+        
+        uniqueValues[requestedColumn] = Array.from(values).sort();
+      } else {
+        // Try to find column by partial match
+        const partialMatch = headers.find(header => 
+          header && header.toString().toLowerCase().includes(requestedColumn.toLowerCase())
+        );
+        
+        if (partialMatch) {
+          const partialIndex = headers.indexOf(partialMatch);
+          const values = new Set();
+          
+          worksheet.eachRow((row, rowNumber) => {
+            if (rowNumber > 1) {
+              const cellValue = row.getCell(partialIndex + 1).value;
+              if (cellValue && cellValue.toString().trim() !== '') {
+                values.add(cellValue.toString().trim());
+              }
+            }
+          });
+          
+          uniqueValues[requestedColumn] = Array.from(values).sort();
+        } else {
+          uniqueValues[requestedColumn] = [];
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      sheetName: sheetName,
+      uniqueValues: uniqueValues,
+      totalColumns: columnArray.length,
+      foundColumns: Object.keys(uniqueValues).filter(key => uniqueValues[key].length > 0).length
+    });
+    
+  } catch (error) {
+    console.error('Error extracting unique values:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to extract unique values: ' + error.message
+    });
+  }
+});
+
+// GET /all-data - Get data from all sheets for cross-sheet suggestions
+app.get('/all-data', async (req, res) => {
+  try {
+    if (!fs.existsSync(EXCEL_FILE)) {
+      return res.json({
+        success: true,
+        data: [],
+        totalRecords: 0
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(EXCEL_FILE);
+    
+    let allData = [];
+    
+    // Iterate through all worksheets
+    workbook.eachSheet((worksheet, sheetId) => {
+      const headers = [];
+      const headerRow = worksheet.getRow(1);
+      headerRow.eachCell((cell, colNumber) => {
+        headers.push(cell.value || `Column${colNumber}`);
+      });
+      
+      // Extract data from this sheet
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) { // Skip header row
+          const rowData = {};
+          headers.forEach((header, colIndex) => {
+            const cellValue = row.getCell(colIndex + 1).value;
+            rowData[header] = cellValue || '';
+          });
+          allData.push(rowData);
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      data: allData,
+      totalRecords: allData.length,
+      sheets: workbook.worksheets.map(ws => ws.name)
+    });
+    
+  } catch (error) {
+    console.error('Error getting all data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get all data: ' + error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
   res.json({ 
