@@ -1,0 +1,24 @@
+{
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "js/ts.format.enable": true,
+    "html.format.enable": true,
+    "css.format.enable": true,
+    "emmet.includeLanguages": {
+        "javascript": "javascriptreact"
+    },
+    "files.associations": {
+        "*.js": "javascript",
+        "*.html": "html",
+        "*.css": "css",
+        "*.json": "json"
+    },
+    "git.autofetch": true,
+    "git.enableSmartCommit": true,
+    "git.confirmSync": false,
+    "terminal.integrated.shell.windows": "powershell.exe",
+    "node.debugStrategy": "attach",
+    "debug.node.autoAttach": "on"
+}
