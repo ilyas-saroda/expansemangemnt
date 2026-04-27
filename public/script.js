@@ -11,6 +11,8 @@ let currentSheet = 'Expenses'; // Track currently selected sheet
 let availableSheets = []; // Track available sheets
 let dynamicFieldCount = 0; // Track dynamic fields count
 let currentSheetHeaders = []; // Track current sheet headers
+let activeAutocomplete = null; // Track active autocomplete instance
+let allSheetsData = []; // Store data from all sheets for cross-sheet suggestions
 
 // DOM elements cache
 const elements = {
@@ -49,6 +51,7 @@ const elements = {
     createSheetBtn: document.getElementById('createSheetBtn'),
     cancelCreateSheetBtn: document.getElementById('cancelCreateSheetBtn'),
     sheetSelect: document.getElementById('sheetSelect'),
+    deleteSheetBtn: document.getElementById('deleteSheetBtn'),
     addFieldBtn: document.getElementById('addFieldBtn'),
     clearFieldsBtn: document.getElementById('clearFieldsBtn'),
     dynamicFieldsContainer: document.getElementById('dynamicFieldsContainer')
@@ -65,6 +68,7 @@ function initializeEventListeners() {
     
     // Sheet selection
     elements.sheetSelect?.addEventListener('change', handleSheetChange);
+    elements.deleteSheetBtn?.addEventListener('click', deleteCurrentSheet);
         elements.closeVoucherBtn?.addEventListener('click', () => {
         elements.voucherModal?.classList.remove('active');
     });
@@ -128,6 +132,7 @@ function initializeEventListeners() {
 document.addEventListener('DOMContentLoaded', function() {
     initializeEventListeners();
     loadExistingData();
+    loadAllSheetsData(); // Load all sheets data for cross-sheet suggestions
     updateStatistics();
 });
 
@@ -259,6 +264,8 @@ function convertIntegerToWords(num) {
 function refreshData() {
     showLoading('Refreshing data...');
     loadExistingData();
+    loadAllSheetsData(); // Refresh all sheets data for suggestions
+    loadUniqueValuesForAutocomplete(); // Refresh unique values for current sheet
 }
 
 // Dynamic Fields Management
@@ -414,6 +421,7 @@ async function loadExistingData() {
             renderTable();
             updateStatistics();
             updateFilters();
+            loadUniqueValuesForAutocomplete(); // Load unique values for autocomplete
             
             showToast(`Loaded ${result.data.length} records from "${currentSheet}"`, 'success');
         } else {
@@ -433,6 +441,114 @@ function handleSheetChange() {
     if (selectedSheet && selectedSheet !== currentSheet) {
         currentSheet = selectedSheet;
         loadExistingData(); // Reload data for the selected sheet
+        loadUniqueValuesForAutocomplete(); // Reload unique values for the new sheet
+    }
+    updateDeleteButtonVisibility();
+}
+
+// Update delete button visibility based on selected sheet
+function updateDeleteButtonVisibility() {
+    if (!elements.deleteSheetBtn || !availableSheets.length) return;
+    
+    const currentSheetInfo = availableSheets.find(sheet => sheet.name === currentSheet);
+    
+    if (currentSheetInfo && !currentSheetInfo.isDefault) {
+        // Show delete button for custom sheets
+        elements.deleteSheetBtn.style.display = 'inline-block';
+    } else {
+        // Hide delete button for default sheets
+        elements.deleteSheetBtn.style.display = 'none';
+    }
+}
+
+// Delete current sheet function
+async function deleteCurrentSheet() {
+    if (!currentSheet) return;
+    
+    // Find current sheet info to check if it's default
+    const currentSheetInfo = availableSheets.find(sheet => sheet.name === currentSheet);
+    
+    if (!currentSheetInfo || currentSheetInfo.isDefault) {
+        showToast('Cannot delete default sheet', 'error');
+        return;
+    }
+    
+    // Confirm deletion
+    const confirmed = confirm(`Are you sure you want to permanently delete the sheet ${currentSheet}? All records within this sheet will be lost.`);
+    
+    if (!confirmed) return;
+    
+    try {
+        showLoading('Deleting sheet...');
+        
+        const response = await fetch('/delete-sheet', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sheetName: currentSheet
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('Sheet deleted successfully', 'success');
+            
+            // Remove sheet from available sheets
+            availableSheets = availableSheets.filter(sheet => sheet.name !== currentSheet);
+            
+            // Reset suggestion lists since sheet is being deleted
+            currentSheetUniqueValues = {};
+            
+            // Refresh List: Update the 'Current Sheet' dropdown list immediately
+            updateSheetSelector();
+            
+            // Automatic Redirect: Switch to 'Expenses (Default)' sheet
+            const defaultSheet = availableSheets.find(sheet => sheet.isDefault);
+            if (defaultSheet) {
+                currentSheet = defaultSheet.name;
+            } else {
+                // Fallback to Expenses if no default sheet found
+                currentSheet = 'Expenses';
+            }
+            
+            // State Clear: Load data for the default sheet and refresh UI
+            await loadExistingData();
+            
+            // Ensure delete button visibility is updated
+            updateDeleteButtonVisibility();
+            
+        } else {
+            // Enhanced error handling for specific scenarios
+            let errorMessage = result.error || 'Failed to delete sheet';
+            
+            // Check for common error patterns and provide user-friendly messages
+            if (errorMessage.includes('EBUSY') || errorMessage.includes('locked') || errorMessage.includes('in use')) {
+                errorMessage = 'File is currently in use. Please close the Excel file and try again.';
+            } else if (errorMessage.includes('not found')) {
+                errorMessage = 'Sheet not found. It may have already been deleted.';
+            } else if (errorMessage.includes('permission') || errorMessage.includes('access')) {
+                errorMessage = 'Permission denied. Please check file permissions and try again.';
+            }
+            
+            showToast(errorMessage, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting sheet:', error);
+        
+        // Handle network and parsing errors
+        let errorMessage = 'Network error. Please try again.';
+        if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'Unable to connect to server. Please check your connection.';
+        } else if (error.message.includes('JSON')) {
+            errorMessage = 'Server response error. Please try again.';
+        }
+        
+        showToast(errorMessage, 'error');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -451,6 +567,9 @@ function updateSheetSelector() {
         option.selected = sheet.name === currentSheet;
         elements.sheetSelect.appendChild(option);
     });
+    
+    // Update delete button visibility
+    updateDeleteButtonVisibility();
 }
 
 // Populate Given To filter dropdown
@@ -555,15 +674,226 @@ function populateFilterFromHeader(filterId, header) {
     });
 }
 
-// Get unique values from expense data
+// Load all sheets data for cross-sheet suggestions
+async function loadAllSheetsData() {
+    try {
+        const response = await fetch('/all-data');
+        const result = await response.json();
+        
+        if (result.success) {
+            allSheetsData = result.data || [];
+            console.log(`Loaded ${allSheetsData.length} records from all sheets for suggestions`);
+        } else {
+            console.warn('Failed to load all sheets data:', result.error);
+            allSheetsData = [];
+        }
+    } catch (error) {
+        console.error('Error loading all sheets data:', error);
+        allSheetsData = [];
+    }
+}
+
+// Fetch unique values for specific columns from current sheet
+async function fetchUniqueValuesForColumns(columns, sheetName = currentSheet) {
+    try {
+        const response = await fetch(`/unique-values?sheetName=${encodeURIComponent(sheetName)}&columns=${encodeURIComponent(columns.join(','))}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            return result.uniqueValues || {};
+        } else {
+            console.warn('Failed to fetch unique values:', result.error);
+            return {};
+        }
+    } catch (error) {
+        console.error('Error fetching unique values:', error);
+        return {};
+    }
+}
+
+// Store unique values for current sheet
+let currentSheetUniqueValues = {};
+
+// Load unique values for autocomplete fields
+async function loadUniqueValuesForAutocomplete() {
+    const columns = ['givenTo', 'mode', 'fund', 'status'];
+    currentSheetUniqueValues = await fetchUniqueValuesForColumns(columns, currentSheet);
+    console.log('Loaded unique values for autocomplete:', currentSheetUniqueValues);
+}
+
+// Get unique values from all sheets data (for cross-sheet suggestions)
 function getUniqueValues(field) {
     const values = new Set();
-    expenseData.forEach(expense => {
+    
+    // Use all sheets data if available, otherwise fall back to current sheet data
+    const dataSource = allSheetsData.length > 0 ? allSheetsData : expenseData;
+    
+    dataSource.forEach(expense => {
         if (expense[field] && expense[field].trim() !== '') {
             values.add(expense[field].trim());
         }
     });
     return Array.from(values).sort();
+}
+
+// Autocomplete functionality
+function createAutocomplete(input, field) {
+    const container = document.createElement('div');
+    container.className = 'autocomplete-container';
+    input.parentNode.insertBefore(container, input);
+    container.appendChild(input);
+    input.classList.add('has-autocomplete');
+    
+    const suggestionsDiv = document.createElement('div');
+    suggestionsDiv.className = 'autocomplete-suggestions';
+    suggestionsDiv.style.display = 'none';
+    container.appendChild(suggestionsDiv);
+    
+    let currentFocus = -1;
+    
+    // Show all suggestions on focus
+    function showAllSuggestions() {
+        const value = input.value.toLowerCase().trim();
+        suggestionsDiv.innerHTML = '';
+        currentFocus = -1;
+        
+        const suggestions = getSuggestions(field, value);
+        if (suggestions.length > 0) {
+            suggestionsDiv.style.display = 'block';
+            suggestions.forEach((suggestion, index) => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-suggestion';
+                item.innerHTML = highlightMatch(suggestion, value);
+                item.addEventListener('click', function() {
+                    input.value = suggestion;
+                    suggestionsDiv.style.display = 'none';
+                    input.focus();
+                });
+                suggestionsDiv.appendChild(item);
+            });
+        }
+    }
+    
+    // Focus event handler - show all suggestions
+    input.addEventListener('focus', function() {
+        showAllSuggestions();
+    });
+    
+    // Click event handler - show all suggestions
+    input.addEventListener('click', function(e) {
+        e.preventDefault();
+        showAllSuggestions();
+    });
+    
+    // Input event handler - filter suggestions
+    input.addEventListener('input', function() {
+        showAllSuggestions();
+    });
+    
+    // Keyboard navigation
+    input.addEventListener('keydown', function(e) {
+        const items = suggestionsDiv.getElementsByClassName('autocomplete-suggestion');
+        if (e.key === 'ArrowDown') {
+            currentFocus++;
+            addActive(items);
+        } else if (e.key === 'ArrowUp') {
+            currentFocus--;
+            addActive(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (currentFocus > -1) {
+                items[currentFocus].click();
+            }
+        } else if (e.key === 'Escape') {
+            suggestionsDiv.style.display = 'none';
+        }
+    });
+    
+    // Hide suggestions when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!container.contains(e.target)) {
+            suggestionsDiv.style.display = 'none';
+        }
+    });
+    
+    function addActive(items) {
+        if (!items) return false;
+        removeActive(items);
+        if (currentFocus >= items.length) currentFocus = 0;
+        if (currentFocus < 0) currentFocus = items.length - 1;
+        items[currentFocus].classList.add('selected');
+    }
+    
+    function removeActive(items) {
+        for (let item of items) {
+            item.classList.remove('selected');
+        }
+    }
+}
+
+function getSuggestions(field, query) {
+    // Use current sheet unique values if available, otherwise fall back to cross-sheet data
+    let allValues = [];
+    
+    if (currentSheetUniqueValues[field] && currentSheetUniqueValues[field].length > 0) {
+        allValues = currentSheetUniqueValues[field];
+    } else {
+        // Fallback to cross-sheet suggestions
+        allValues = getUniqueValues(field);
+    }
+    
+    // If query is empty, return all values
+    if (!query || query.trim() === '') {
+        return allValues; // Return all values without limit
+    }
+    
+    return allValues.filter(value => 
+        value.toLowerCase().includes(query.toLowerCase())
+    ); // Return all matching values without limit
+}
+
+function highlightMatch(text, query) {
+    const regex = new RegExp(`(${query})`, 'gi');
+    return text.replace(regex, '<strong>$1</strong>');
+}
+
+function addDynamicStatusOptions(select) {
+    // Get existing status options from data
+    const existingStatuses = getUniqueValues('status');
+    const defaultOptions = ['Pending', 'Paid', 'Completed', 'In Progress', 'Cancelled'];
+    
+    // Clear existing options except the first one
+    while (select.children.length > 1) {
+        select.removeChild(select.lastChild);
+    }
+    
+    // Combine existing statuses with default options
+    const allOptions = [...new Set([...existingStatuses, ...defaultOptions])].sort();
+    
+    // Add all options to dropdown
+    allOptions.forEach(status => {
+        if (status && status.trim()) {
+            const option = document.createElement('option');
+            option.value = status;
+            option.textContent = status;
+            select.appendChild(option);
+        }
+    });
+    
+    // Add focus event to open dropdown
+    select.addEventListener('focus', function() {
+        this.size = allOptions.length + 1; // Show all options
+    });
+    
+    // Add blur event to reset dropdown
+    select.addEventListener('blur', function() {
+        this.size = 1;
+    });
+    
+    // Add click event to ensure dropdown opens
+    select.addEventListener('click', function() {
+        this.size = allOptions.length + 1; // Show all options
+    });
 }
 
 // Simplified table rendering
@@ -765,6 +1095,7 @@ async function handleFileUpload(event) {
             renderTable();
             updateStatistics();
             updateFilters();
+            loadAllSheetsData(); // Refresh all sheets data for suggestions
             showToast(result.message || 'Excel file imported successfully!', 'success');
         } else {
             // Error from server
@@ -1744,6 +2075,7 @@ function clearAllData() {
     
     if (confirm('Are you sure you want to clear all expense records?')) {
         expenseData = [];
+        currentSheetUniqueValues = {}; // Reset suggestion lists
         renderTable();
         updateStatistics();
         showToast('All data cleared successfully!', 'success');
@@ -2364,24 +2696,13 @@ function generateDynamicForm() {
             // Set today's date as default
             input.value = new Date().toISOString().split('T')[0];
         } else if (headerLower.includes('status')) {
-            // Dropdown for status fields
-            input = document.createElement('select');
+            // Text input with autocomplete for status fields (to enable click-to-show functionality)
+            input = document.createElement('input');
+            input.type = 'text';
             input.id = `field_${index}`;
+            input.placeholder = `Enter ${header}`;
             if (isRequired) input.required = true;
-            
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = `Select ${header}`;
-            input.appendChild(defaultOption);
-            
-            // Add common status options
-            const statusOptions = ['Pending', 'Paid', 'Completed', 'In Progress', 'Cancelled'];
-            statusOptions.forEach(option => {
-                const optionElement = document.createElement('option');
-                optionElement.value = option;
-                optionElement.textContent = option;
-                input.appendChild(optionElement);
-            });
+            input.autocomplete = 'off';
         } else if (headerLower.includes('amount') || headerLower.includes('price')) {
             // Number input for amount fields
             input = document.createElement('input');
@@ -2404,11 +2725,7 @@ function generateDynamicForm() {
             input.id = `field_${index}`;
             input.placeholder = `Enter ${header}`;
             if (isRequired) input.required = true;
-            
-            // Add autocomplete for common fields
-            if (headerLower.includes('given') || headerLower.includes('person') || headerLower.includes('name')) {
-                input.autocomplete = 'off';
-            }
+            input.autocomplete = 'off';
         }
         
         // Store the header name as a data attribute
@@ -2418,6 +2735,20 @@ function generateDynamicForm() {
         formGroup.appendChild(input);
         formRow.appendChild(formGroup);
         dynamicFormFields.appendChild(formRow);
+        
+        // Add autocomplete for specific fields
+        setTimeout(() => {
+            if (headerLower.includes('given') || headerLower.includes('person') || headerLower.includes('name')) {
+                createAutocomplete(input, 'givenTo');
+            } else if (headerLower.includes('mode')) {
+                createAutocomplete(input, 'mode');
+            } else if (headerLower.includes('fund')) {
+                createAutocomplete(input, 'fund');
+            } else if (headerLower.includes('status')) {
+                // Apply autocomplete to status field as well
+                createAutocomplete(input, 'status');
+            }
+        }, 100);
     });
 }
 

@@ -1106,6 +1106,100 @@ app.post('/api/add-sheet', async (req, res) => {
   }
 });
 
+// POST /delete-sheet - Delete a sheet (frontend endpoint)
+app.post('/delete-sheet', async (req, res) => {
+  try {
+    const { sheetName } = req.body;
+    
+    if (!sheetName || sheetName.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Sheet name is required'
+      });
+    }
+    
+    if (sheetName === 'Expenses') {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete default Expenses sheet'
+      });
+    }
+
+    // Load the workbook using ExcelJS to preserve all sheets
+    const workbook = new ExcelJS.Workbook();
+    
+    if (fs.existsSync(EXCEL_FILE)) {
+      await workbook.xlsx.readFile(EXCEL_FILE);
+    } else {
+      return res.status(404).json({
+        success: false,
+        error: 'Excel file not found'
+      });
+    }
+
+    // Check if sheet exists
+    const worksheet = workbook.getWorksheet(sheetName);
+    if (!worksheet) {
+      return res.status(404).json({
+        success: false,
+        error: `Sheet "${sheetName}" not found`
+      });
+    }
+
+    // Remove the worksheet
+    workbook.removeWorksheet(worksheet.id);
+
+    // Save the workbook with error handling for file locks
+    try {
+      await workbook.xlsx.writeFile(EXCEL_FILE);
+    } catch (writeError) {
+      console.error('Error writing workbook:', writeError);
+      
+      // Handle file lock scenarios
+      if (writeError.message.includes('EBUSY') || writeError.message.includes('locked') || writeError.message.includes('in use')) {
+        return res.status(423).json({
+          success: false,
+          error: 'File is currently in use. Please close the Excel file and try again.'
+        });
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save workbook: ' + writeError.message
+      });
+    }
+    
+    // Get updated list of sheets
+    const remainingSheets = await getWorkbookSheets();
+    
+    res.json({
+      success: true,
+      message: 'Sheet deleted successfully',
+      sheetName: sheetName,
+      remainingSheets: remainingSheets
+    });
+    
+  } catch (error) {
+    console.error('Error deleting sheet:', error);
+    
+    // Enhanced error handling for specific scenarios
+    let errorMessage = error.message || 'Failed to delete sheet';
+    
+    if (errorMessage.includes('EBUSY') || errorMessage.includes('locked') || errorMessage.includes('in use')) {
+      errorMessage = 'File is currently in use. Please close the Excel file and try again.';
+    } else if (errorMessage.includes('not found')) {
+      errorMessage = 'Sheet not found. It may have already been deleted.';
+    } else if (errorMessage.includes('permission') || errorMessage.includes('access')) {
+      errorMessage = 'Permission denied. Please check file permissions and try again.';
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
   res.json({ 
