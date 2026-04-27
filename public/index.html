@@ -149,21 +149,9 @@
                         <input type="text" id="searchInput" placeholder="Search expenses...">
                     </div>
                     <div class="filter-controls">
-                        <select id="statusFilter" class="filter-select">
-                            <option value="">All Status</option>
-                            <option value="Paid">Paid</option>
-                            <option value="Pending">Pending</option>
-                        </select>
-                        <select id="modeFilter" class="filter-select">
-                            <option value="">All Modes</option>
-                            <option value="Cash">Cash</option>
-                            <option value="Card">Card</option>
-                            <option value="Online">Online</option>
-                            <option value="Cheque">Cheque</option>
-                        </select>
-                        <select id="givenToFilter" class="filter-select">
-                            <option value="">All Persons</option>
-                        </select>
+                        <div id="dynamicFilters" class="dynamic-filters">
+                            <!-- Dynamic filters will be inserted here -->
+                        </div>
                         <input type="date" id="dateFilter" class="filter-date">
                         <button id="clearFilters" class="btn btn-secondary btn-sm">
                             <i class="fas fa-times"></i>

@@ -54,7 +54,8 @@ const elements = {
     deleteSheetBtn: document.getElementById('deleteSheetBtn'),
     addFieldBtn: document.getElementById('addFieldBtn'),
     clearFieldsBtn: document.getElementById('clearFieldsBtn'),
-    dynamicFieldsContainer: document.getElementById('dynamicFieldsContainer')
+    dynamicFieldsContainer: document.getElementById('dynamicFieldsContainer'),
+    dynamicFilters: document.getElementById('dynamicFilters')
 };
 
 // Initialize event listeners - simplified
@@ -420,7 +421,7 @@ async function loadExistingData() {
             
             renderTable();
             updateStatistics();
-            updateFilters();
+            generateDynamicFilters();
             loadUniqueValuesForAutocomplete(); // Load unique values for autocomplete
             
             showToast(`Loaded ${result.data.length} records from "${currentSheet}"`, 'success');
@@ -442,6 +443,7 @@ function handleSheetChange() {
         currentSheet = selectedSheet;
         loadExistingData(); // Reload data for the selected sheet
         loadUniqueValuesForAutocomplete(); // Reload unique values for the new sheet
+        generateDynamicFilters(); // Regenerate filters for the new sheet
     }
     updateDeleteButtonVisibility();
 }
@@ -614,47 +616,66 @@ function populateModeFilter() {
     }
 }
 
-// Update filters dynamically based on current sheet headers
-function updateFilters() {
+// Generate dynamic filters based on current sheet headers
+function generateDynamicFilters() {
+    if (!elements.dynamicFilters) return;
+    
+    // Clear existing dynamic filters
+    elements.dynamicFilters.innerHTML = '';
+    
+    // Handle empty sheets
     if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
-        // Use default filters for expense sheet
-        populateModeFilter();
-        populateGivenToFilter();
         return;
     }
     
-    // Clear all filter dropdowns except the first option
-    const filterElements = ['statusFilter', 'modeFilter', 'givenToFilter'];
-    filterElements.forEach(filterId => {
-        const filter = document.getElementById(filterId);
-        if (filter) {
-            while (filter.children.length > 1) {
-                filter.removeChild(filter.lastChild);
-            }
-        }
-    });
+    // Exclude certain columns from filters
+    const excludedColumns = ['Sr No', 'srNo', 'Date', 'date', 'Amount', 'amount'];
     
-    // Populate filters based on available headers
+    // Create filter for each header
     currentSheetHeaders.forEach(header => {
-        if (header.toLowerCase().includes('status')) {
-            populateFilterFromHeader('statusFilter', header);
-        } else if (header.toLowerCase().includes('mode')) {
-            populateFilterFromHeader('modeFilter', header);
-        } else if (header.toLowerCase().includes('given') || header.toLowerCase().includes('to')) {
-            populateFilterFromHeader('givenToFilter', header);
+        // Skip excluded columns
+        if (excludedColumns.some(excluded => header.toLowerCase().includes(excluded.toLowerCase()))) {
+            return;
+        }
+        
+        // Create filter dropdown
+        const filterContainer = document.createElement('div');
+        filterContainer.className = 'filter-item';
+        
+        const select = document.createElement('select');
+        select.id = `filter_${header.replace(/\s+/g, '_').toLowerCase()}`;
+        select.className = 'filter-select';
+        select.setAttribute('data-column', header);
+        
+        // Add "All" option
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = `All ${header}`;
+        select.appendChild(allOption);
+        
+        // Populate with unique values
+        populateDynamicFilter(select, header);
+        
+        // Add event listener
+        select.addEventListener('change', applyDynamicFilters);
+        
+        filterContainer.appendChild(select);
+        elements.dynamicFilters.appendChild(filterContainer);
+    });
+}
+
+// Populate individual dynamic filter with unique values
+function populateDynamicFilter(selectElement, header) {
+    const uniqueValues = getUniqueValues(header);
+    
+    uniqueValues.forEach(value => {
+        if (value && value.trim()) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            selectElement.appendChild(option);
         }
     });
-    
-    // Default to expense filters if no matching headers found
-    if (currentSheetHeaders.includes('Status') || currentSheetHeaders.includes('status')) {
-        populateFilterFromHeader('statusFilter', 'Status');
-    }
-    if (currentSheetHeaders.includes('Mode') || currentSheetHeaders.includes('mode')) {
-        populateFilterFromHeader('modeFilter', 'Mode');
-    }
-    if (currentSheetHeaders.includes('Given To') || currentSheetHeaders.includes('givenTo')) {
-        populateFilterFromHeader('givenToFilter', 'Given To');
-    }
 }
 
 // Populate filter from specific header
@@ -1170,10 +1191,14 @@ function applyFilters() {
 
 function clearAllFilters() {
     elements.searchInput.value = '';
-    elements.statusFilter.value = '';
-    elements.modeFilter.value = '';
-    elements.givenToFilter.value = '';
     elements.dateFilter.value = '';
+    
+    // Clear all dynamic filters
+    const dynamicFilters = elements.dynamicFilters?.querySelectorAll('.filter-select') || [];
+    dynamicFilters.forEach(filter => {
+        filter.value = '';
+    });
+    
     filteredData = [];
     renderTable();
     updateStatistics();
@@ -1244,7 +1269,7 @@ async function handleFileUpload(event) {
             expenseData = result.data;
             renderTable();
             updateStatistics();
-            updateFilters();
+            generateDynamicFilters();
             loadAllSheetsData(); // Refresh all sheets data for suggestions
             showToast(result.message || 'Excel file imported successfully!', 'success');
         } else {
@@ -2614,38 +2639,37 @@ function createPrintContent(data) {
 }
 
 // Search and Filter Functions
-function applyFilters() {
-    const searchTerm = searchInput.value.toLowerCase().trim();
-    const statusValue = statusFilter.value;
-    const modeValue = modeFilter.value;
-    const givenToValue = givenToFilter.value;
-    const dateValue = dateFilter.value;
+function applyDynamicFilters() {
+    const searchTerm = elements.searchInput?.value.toLowerCase().trim() || '';
+    const dateValue = elements.dateFilter?.value || '';
+    
+    // Get all dynamic filter values
+    const dynamicFilterValues = {};
+    const dynamicFilters = elements.dynamicFilters?.querySelectorAll('.filter-select') || [];
+    
+    dynamicFilters.forEach(filter => {
+        const column = filter.getAttribute('data-column');
+        const value = filter.value;
+        if (column && value) {
+            dynamicFilterValues[column] = value;
+        }
+    });
     
     filteredData = expenseData.filter(expense => {
         // Search filter
-        const matchesSearch = !searchTerm || 
-            expense.givenTo?.toLowerCase().includes(searchTerm) ||
-            expense.description?.toLowerCase().includes(searchTerm) ||
-            expense.fund?.toLowerCase().includes(searchTerm) ||
-            expense.mode?.toLowerCase().includes(searchTerm);
-        
-        // Status filter
-        const matchesStatus = !statusValue || expense.status === statusValue;
-        
-        // Mode filter
-        const matchesMode = !modeValue || expense.mode === modeValue;
-        
-        // Given To filter
-        const matchesGivenTo = !givenToValue || expense.givenTo === givenToValue;
+        const matchesSearch = searchTerm === '' || Object.values(expense).some(value => 
+            value && value.toString().toLowerCase().includes(searchTerm)
+        );
         
         // Date filter
-        let matchesDate = !dateValue;
-        if (dateValue && expense.date) {
-            const expenseDate = new Date(expense.date).toISOString().split('T')[0];
-            matchesDate = expenseDate === dateValue;
-        }
+        const matchesDate = dateValue === '' || expense.date === dateValue;
         
-        return matchesSearch && matchesStatus && matchesMode && matchesGivenTo && matchesDate;
+        // Dynamic filters
+        const matchesDynamicFilters = Object.entries(dynamicFilterValues).every(([column, value]) => {
+            return expense[column] === value;
+        });
+        
+        return matchesSearch && matchesDate && matchesDynamicFilters;
     });
     
     renderTable();

@@ -42,6 +42,39 @@
     border-color: #007bff;
 }
 
+/* Dynamic Filters Styles */
+.dynamic-filters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filter-item {
+    display: inline-block;
+}
+
+.filter-select {
+    padding: 8px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    background: white;
+    font-size: 0.9rem;
+    min-width: 120px;
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.filter-select:hover {
+    border-color: #007bff;
+}
+
 /* Bulk Voucher Modal Styles */
 .bulk-selection-container {
     max-width: 600px;
