@@ -15,6 +15,7 @@ const JSON_FILE = 'expenses.json';
 
 // Global variable to store current data
 let currentExpenses = [];
+let currentSheet = 'Expenses'; // Default sheet
 
 // Middleware
 app.use(cors());

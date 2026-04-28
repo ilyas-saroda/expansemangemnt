@@ -618,6 +618,17 @@ function populateModeFilter() {
 
 // Generate dynamic filters based on current sheet headers
 function generateDynamicFilters() {
+    console.log('=== GENERATING DYNAMIC FILTERS ===');
+    console.log('Current sheet:', currentSheet);
+    console.log('Current sheet headers:', currentSheetHeaders);
+    console.log('Expense data length:', expenseData.length);
+    
+    // Debug: Show sample data structure
+    if (expenseData.length > 0) {
+        console.log('Sample expense data keys:', Object.keys(expenseData[0]));
+        console.log('Sample expense data:', expenseData[0]);
+    }
+    
     if (!elements.dynamicFilters) return;
     
     // Clear existing dynamic filters
@@ -625,18 +636,20 @@ function generateDynamicFilters() {
     
     // Handle empty sheets
     if (!currentSheetHeaders || currentSheetHeaders.length === 0) {
-        return;
+        console.log('No headers found for sheet:', currentSheet);
+        
+        // For empty sheets, provide default expense filters
+        const defaultHeaders = ['givenTo', 'mode', 'description', 'fund', 'status'];
+        currentSheetHeaders = defaultHeaders;
+        console.log('Using default headers for empty sheet:', currentSheetHeaders);
     }
     
-    // Exclude certain columns from filters
-    const excludedColumns = ['Sr No', 'srNo', 'Date', 'date', 'Amount', 'amount'];
-    
-    // Create filter for each header
+    // Create filter for each header - NO EXCLUSIONS as per user requirement
+    const filterableHeaders = [];
     currentSheetHeaders.forEach(header => {
-        // Skip excluded columns
-        if (excludedColumns.some(excluded => header.toLowerCase().includes(excluded.toLowerCase()))) {
-            return;
-        }
+        // Include ALL headers as per user requirement - no exclusions
+        console.log('Creating filter for header:', header);
+        filterableHeaders.push(header);
         
         // Create filter dropdown
         const filterContainer = document.createElement('div');
@@ -653,21 +666,70 @@ function generateDynamicFilters() {
         allOption.textContent = `All ${header}`;
         select.appendChild(allOption);
         
-        // Populate with unique values
+        // Populate with unique values from current sheet
         populateDynamicFilter(select, header);
         
-        // Add event listener
+        // Add event listener for dynamic filtering
         select.addEventListener('change', applyDynamicFilters);
         
         filterContainer.appendChild(select);
         elements.dynamicFilters.appendChild(filterContainer);
     });
+    
+    console.log('Created filters for headers:', filterableHeaders);
+    console.log('Total filters created:', filterableHeaders.length);
+    
+    // Clear any existing filtered data when switching sheets
+    filteredData = [];
 }
 
-// Populate individual dynamic filter with unique values
+// Populate individual dynamic filter with unique values and improved field matching
 function populateDynamicFilter(selectElement, header) {
-    const uniqueValues = getUniqueValues(header);
+    // Validate header parameter
+    if (!header || typeof header !== 'string') {
+        console.error(`Invalid header parameter in populateDynamicFilter: ${header}`);
+        // Add placeholder and return
+        const option = document.createElement('option');
+        option.value = 'invalid_header';
+        option.textContent = 'Invalid header';
+        option.disabled = true;
+        option.style.color = '#999';
+        selectElement.appendChild(option);
+        return;
+    }
     
+    console.log(`Populating filter for header: ${header}`);
+    
+    // Try to get unique values with error handling
+    let uniqueValues = [];
+    try {
+        uniqueValues = getUniqueValues(header);
+        console.log(`Found ${uniqueValues.length} unique values for ${header}:`, uniqueValues.slice(0, 10));
+    } catch (error) {
+        console.error(`Error getting unique values for ${header}:`, error);
+    }
+    
+    // If no values found, try alternative field names and add debugging info
+    if (uniqueValues.length === 0) {
+        console.log(`No values found for ${header}, trying alternative approaches...`);
+        
+        // Try to find if data exists with different field names
+        console.log(`Available headers:`, currentSheetHeaders);
+        console.log(`Sample data keys:`, expenseData.length > 0 ? Object.keys(expenseData[0]) : 'No data');
+        
+        // Add a more informative placeholder
+        const option = document.createElement('option');
+        option.value = 'no_data';
+        option.textContent = `No data for ${header}`;
+        option.disabled = true;
+        option.style.color = '#999';
+        selectElement.appendChild(option);
+        
+        console.log(`Added placeholder for ${header} - check console for field matching details`);
+        return;
+    }
+    
+    // Add unique values to the filter
     uniqueValues.forEach(value => {
         if (value && value.trim()) {
             const option = document.createElement('option');
@@ -676,6 +738,8 @@ function populateDynamicFilter(selectElement, header) {
             selectElement.appendChild(option);
         }
     });
+    
+    console.log(`Successfully populated filter for ${header} with ${selectElement.options.length - 1} options`);
 }
 
 // Populate filter from specific header
@@ -757,19 +821,129 @@ async function loadUniqueValuesForAutocomplete() {
     }
 }
 
-// Get unique values from all sheets data (for cross-sheet suggestions)
+// Get unique values from current sheet data with robust field matching
 function getUniqueValues(field) {
     const values = new Set();
     
-    // Use all sheets data if available, otherwise fall back to current sheet data
-    const dataSource = allSheetsData.length > 0 ? allSheetsData : expenseData;
+    // Comprehensive debugging
+    console.log(`=== DEBUGGING getUniqueValues ===`);
+    console.log(`Field parameter:`, field);
+    console.log(`Field type:`, typeof field);
+    console.log(`currentSheetHeaders:`, currentSheetHeaders);
+    console.log(`currentSheetHeaders type:`, typeof currentSheetHeaders);
+    console.log(`expenseData:`, expenseData);
+    console.log(`expenseData type:`, typeof expenseData);
     
-    dataSource.forEach(expense => {
-        if (expense[field] && expense[field].trim() !== '') {
-            values.add(expense[field].trim());
+    // Validate input parameter
+    if (!field || typeof field !== 'string') {
+        console.error(`❌ INVALID FIELD PARAMETER: ${field} (type: ${typeof field})`);
+        return [];
+    }
+    
+    console.log(`=== GETTING UNIQUE VALUES FOR: ${field} ===`);
+    
+    // Validate required variables
+    if (!currentSheetHeaders || !Array.isArray(currentSheetHeaders)) {
+        console.error(`❌ INVALID currentSheetHeaders:`, currentSheetHeaders);
+        return [];
+    }
+    
+    if (!expenseData || !Array.isArray(expenseData)) {
+        console.error(`❌ INVALID expenseData:`, expenseData);
+        return [];
+    }
+    
+    console.log(`Current sheet data length: ${expenseData.length}`);
+    console.log(`Current sheet headers:`, currentSheetHeaders);
+    
+    // Show actual data keys from first record
+    if (expenseData.length > 0) {
+        console.log(`Actual data keys in first record:`, Object.keys(expenseData[0]));
+    }
+    
+    // Find matching field name with multiple strategies
+    let matchingField = null;
+    const fieldLower = field.toLowerCase().replace(/[^a-z0-9]/g, ''); // Remove special chars
+    
+    // Strategy 1: Exact match
+    if (currentSheetHeaders.includes(field)) {
+        matchingField = field;
+        console.log(`Strategy 1 - Exact match found: ${field}`);
+    }
+    
+    // Strategy 2: Case-insensitive match
+    if (!matchingField) {
+        const foundHeader = currentSheetHeaders.find(header => 
+            header.toLowerCase() === fieldLower
+        );
+        if (foundHeader) {
+            matchingField = foundHeader;
+            console.log(`Strategy 2 - Case-insensitive match: ${field} -> ${matchingField}`);
         }
-    });
-    return Array.from(values).sort();
+    }
+    
+    // Strategy 3: Partial match
+    if (!matchingField) {
+        const partialMatch = currentSheetHeaders.find(header => {
+            const headerClean = header.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return headerClean.includes(fieldLower) || fieldLower.includes(headerClean);
+        });
+        if (partialMatch) {
+            matchingField = partialMatch;
+            console.log(`Strategy 3 - Partial match: ${field} -> ${matchingField}`);
+        }
+    }
+    
+    // Strategy 4: Check actual data keys if headers don't match
+    if (!matchingField && expenseData.length > 0) {
+        const dataKeys = Object.keys(expenseData[0]);
+        const keyMatch = dataKeys.find(key => {
+            const keyClean = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return keyClean.includes(fieldLower) || fieldLower.includes(keyClean);
+        });
+        if (keyMatch) {
+            matchingField = keyMatch;
+            console.log(`Strategy 4 - Data key match: ${field} -> ${matchingField}`);
+        }
+    }
+    
+    if (!matchingField) {
+        console.log(`ERROR: No matching field found for ${field}`);
+        console.log(`Tried all matching strategies against:`, currentSheetHeaders);
+        return [];
+    }
+    
+    console.log(`Final matching field: ${matchingField}`);
+    
+    // Use current sheet data primarily
+    if (expenseData && expenseData.length > 0) {
+        expenseData.forEach((expense, index) => {
+            const value = expense[matchingField];
+            if (value && value.toString().trim() !== '') {
+                values.add(value.toString().trim());
+            }
+            
+            // Debug first few records
+            if (index < 3) {
+                console.log(`Record ${index}: ${matchingField} = "${value}"`);
+            }
+        });
+    } else {
+        console.log('No current sheet data, using all sheets data as fallback');
+        if (allSheetsData && allSheetsData.length > 0) {
+            allSheetsData.forEach(expense => {
+                const value = expense[matchingField];
+                if (value && value.toString().trim() !== '') {
+                    values.add(value.toString().trim());
+                }
+            });
+        }
+    }
+    
+    const result = Array.from(values).sort();
+    console.log(`=== FOUND ${result.length} UNIQUE VALUES FOR ${field} ===`);
+    console.log(`Values:`, result.slice(0, 15));
+    return result;
 }
 
 // Enhanced Autocomplete functionality with sheet-aware unique values
@@ -1157,41 +1331,17 @@ function updateStatistics() {
     if (totalCountEl) totalCountEl.textContent = totalCount;
 }
 
-// Simplified filter functions
+// Apply filters function - now uses dynamic filtering for all sheets
 function applyFilters() {
-    const searchTerm = elements.searchInput?.value.toLowerCase().trim() || '';
-    const statusValue = elements.statusFilter?.value || '';
-    const modeValue = elements.modeFilter?.value || '';
-    const givenToValue = elements.givenToFilter?.value || '';
-    const dateValue = elements.dateFilter?.value || '';
-    
-    filteredData = expenseData.filter(expense => {
-        const matchesSearch = !searchTerm || 
-            expense.givenTo?.toLowerCase().includes(searchTerm) ||
-            expense.description?.toLowerCase().includes(searchTerm) ||
-            expense.fund?.toLowerCase().includes(searchTerm) ||
-            expense.mode?.toLowerCase().includes(searchTerm);
-        
-        const matchesStatus = !statusValue || expense.status === statusValue;
-        const matchesMode = !modeValue || expense.mode === modeValue;
-        const matchesGivenTo = !givenToValue || expense.givenTo === givenToValue;
-        
-        let matchesDate = !dateValue;
-        if (dateValue && expense.date) {
-            const expenseDate = new Date(expense.date).toISOString().split('T')[0];
-            matchesDate = expenseDate === dateValue;
-        }
-        
-        return matchesSearch && matchesStatus && matchesMode && matchesGivenTo && matchesDate;
-    });
-    
-    renderTable();
-    updateFilteredStatistics();
+    applyDynamicFilters();
 }
 
 function clearAllFilters() {
-    elements.searchInput.value = '';
-    elements.dateFilter.value = '';
+    // Clear search input
+    if (elements.searchInput) elements.searchInput.value = '';
+    
+    // Clear date filter
+    if (elements.dateFilter) elements.dateFilter.value = '';
     
     // Clear all dynamic filters
     const dynamicFilters = elements.dynamicFilters?.querySelectorAll('.filter-select') || [];
@@ -1199,6 +1349,7 @@ function clearAllFilters() {
         filter.value = '';
     });
     
+    // Clear filtered data and reset to show all current sheet data
     filteredData = [];
     renderTable();
     updateStatistics();
@@ -1206,9 +1357,33 @@ function clearAllFilters() {
 
 function updateFilteredStatistics() {
     const dataToUse = filteredData.length > 0 ? filteredData : expenseData;
-    const totalAmount = dataToUse.reduce((sum, expense) => sum + parseFloat(expense.amount || 0), 0);
-    const paidCount = dataToUse.filter(expense => expense.status === 'Paid').length;
-    const pendingCount = dataToUse.filter(expense => expense.status === 'Pending').length;
+    
+    // Find amount column dynamically (could be 'Amount', 'amount', etc.)
+    const amountColumn = currentSheetHeaders.find(header => 
+        header.toLowerCase().includes('amount')
+    ) || 'amount';
+    
+    // Find status column dynamically
+    const statusColumn = currentSheetHeaders.find(header => 
+        header.toLowerCase().includes('status')
+    ) || 'status';
+    
+    const totalAmount = dataToUse.reduce((sum, expense) => {
+        const amount = parseFloat(expense[amountColumn] || 0);
+        return sum + amount;
+    }, 0);
+    
+    // Count paid and pending based on status column values
+    const statusCounts = dataToUse.reduce((counts, expense) => {
+        const status = expense[statusColumn] || 'Pending';
+        if (status.toLowerCase().includes('paid')) {
+            counts.paid++;
+        } else if (status.toLowerCase().includes('pending')) {
+            counts.pending++;
+        }
+        return counts;
+    }, { paid: 0, pending: 0 });
+    
     const totalCount = dataToUse.length;
 
     const totalAmountEl = document.getElementById('totalAmount');
@@ -1219,8 +1394,8 @@ function updateFilteredStatistics() {
 
     if (totalAmountEl) totalAmountEl.textContent = formatCurrency(totalAmount);
     if (totalAmountInWordsEl) totalAmountInWordsEl.textContent = numberToWords(totalAmount);
-    if (paidCountEl) paidCountEl.textContent = paidCount;
-    if (pendingCountEl) pendingCountEl.textContent = pendingCount;
+    if (paidCountEl) paidCountEl.textContent = statusCounts.paid;
+    if (pendingCountEl) pendingCountEl.textContent = statusCounts.pending;
     if (totalCountEl) totalCountEl.textContent = totalCount;
 }
 
@@ -1364,6 +1539,9 @@ function createDynamicTableRow(expense, index) {
         } else if (header === 'Date') {
             cellContent = formatDate(expense[header]) || '-';
             cellAttributes = 'contenteditable="true" data-field="' + header + '" data-index="' + index + '"';
+        } else if (header === 'Given To' || header === 'givenTo' || header === 'Given') {
+            cellContent = createEditableGivenToDropdown(expense[header] || '-', index);
+            cellAttributes = 'data-field="' + header + '" data-index="' + index + '"';
         } else {
             cellContent = expense[header] || '-';
             cellAttributes = 'contenteditable="true" data-field="' + header + '" data-index="' + index + '"';
@@ -1400,6 +1578,189 @@ function createEditableStatusBadge(status, index) {
     `;
 }
 
+// Create editable Given To dropdown with manual input capability
+function createEditableGivenToDropdown(value, index) {
+    // Get unique values for the dropdown from current sheet and all sheets
+    const currentSheetValues = currentSheetUniqueValues['givenTo'] || currentSheetUniqueValues['Given To'] || currentSheetUniqueValues['Given'] || [];
+    const allSheetValues = getAllSheetUniqueValues('givenTo').concat(getAllSheetUniqueValues('Given'));
+    
+    // Combine and deduplicate values
+    const allUniqueValues = [...new Set([...currentSheetValues, ...allSheetValues])].filter(v => v && v.trim());
+    
+    // Sort values alphabetically
+    allUniqueValues.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    
+    const currentValue = value === '-' ? '' : value;
+    
+    return `
+        <div class="editable-dropdown-container" style="position: relative; width: 100%;">
+            <select class="editable-dropdown" data-index="${index}" onchange="handleGivenToDropdownChange(this, ${index})" 
+                    style="width: calc(100% - 30px); margin-right: 2px;">
+                <option value="">Select or type...</option>
+                ${allUniqueValues.map(val => 
+                    `<option value="${val}" ${currentValue === val ? 'selected' : ''}>${val}</option>`
+                ).join('')}
+            </select>
+            <input type="text" class="editable-input" value="${currentValue}" 
+                   placeholder="Type manually..." 
+                   data-index="${index}"
+                   onblur="handleGivenToInputChange(this, ${index})"
+                   oninput="handleGivenToInputTyping(this, ${index})"
+                   style="position: absolute; left: 2px; top: 2px; width: calc(100% - 4px); 
+                          border: none; background: transparent; pointer-events: none; opacity: 0;">
+        </div>
+    `;
+}
+
+// Get unique values from all sheets data for cross-sheet suggestions
+function getAllSheetUniqueValues(field) {
+    const values = new Set();
+    
+    allSheetsData.forEach(expense => {
+        if (expense[field] && expense[field].trim()) {
+            values.add(expense[field].trim());
+        }
+    });
+    
+    return Array.from(values);
+}
+
+// Handle Given To dropdown change
+function handleGivenToDropdownChange(selectElement, index) {
+    const newValue = selectElement.value;
+    const container = selectElement.closest('.editable-dropdown-container');
+    const inputElement = container.querySelector('.editable-input');
+    
+    // Update the hidden input field
+    inputElement.value = newValue;
+    
+    // Update the data
+    updateGivenToField(index, newValue);
+    
+    // Sync the dropdown and input
+    syncDropdownAndInput(selectElement, inputElement);
+}
+
+// Handle Given To input change (manual typing)
+function handleGivenToInputChange(inputElement, index) {
+    const newValue = inputElement.value.trim();
+    const container = inputElement.closest('.editable-dropdown-container');
+    const selectElement = container.querySelector('.editable-dropdown');
+    
+    // Update the data
+    updateGivenToField(index, newValue);
+    
+    // Sync the input and dropdown
+    syncDropdownAndInput(selectElement, inputElement);
+}
+
+// Handle typing in input field to show/hide dropdown
+function handleGivenToInputTyping(inputElement, index) {
+    const container = inputElement.closest('.editable-dropdown-container');
+    const selectElement = container.querySelector('.editable-dropdown');
+    
+    // If user starts typing, show the input field and hide dropdown
+    if (inputElement.value.trim()) {
+        inputElement.style.pointerEvents = 'auto';
+        inputElement.style.opacity = '1';
+        selectElement.style.pointerEvents = 'none';
+        selectElement.style.opacity = '0.3';
+    } else {
+        inputElement.style.pointerEvents = 'none';
+        inputElement.style.opacity = '0';
+        selectElement.style.pointerEvents = 'auto';
+        selectElement.style.opacity = '1';
+    }
+}
+
+// Update the Given To field in the data
+function updateGivenToField(index, newValue) {
+    if (index >= 0 && index < expenseData.length) {
+        const oldValue = expenseData[index]['givenTo'] || expenseData[index]['Given To'] || '';
+        
+        // Update both possible field names for compatibility
+        expenseData[index]['givenTo'] = newValue;
+        expenseData[index]['Given To'] = newValue;
+        
+        // Save to server
+        saveDataToCurrentSheet();
+        
+        // Show success feedback if value changed
+        if (oldValue !== newValue) {
+            showToast(`Updated "Given To" to "${newValue}"`, 'success');
+            
+            // Refresh unique values for autocomplete
+            loadUniqueValuesForAutocomplete();
+            
+            // Refresh filters if they exist
+            generateDynamicFilters();
+        }
+    }
+}
+
+// Sync dropdown and input values
+function syncDropdownAndInput(selectElement, inputElement) {
+    const selectValue = selectElement.value;
+    const inputValue = inputElement.value.trim();
+    
+    // If dropdown has a value that matches input, sync them
+    if (selectValue && selectValue === inputValue) {
+        // Values are already synced
+        return;
+    }
+    
+    // If input value exists in dropdown options, select it
+    if (inputValue) {
+        const options = Array.from(selectElement.options);
+        const matchingOption = options.find(option => option.value === inputValue);
+        if (matchingOption) {
+            selectElement.value = inputValue;
+        } else {
+            // Add new value to dropdown if it doesn't exist
+            const newOption = document.createElement('option');
+            newOption.value = inputValue;
+            newOption.textContent = inputValue;
+            newOption.selected = true;
+            selectElement.appendChild(newOption);
+        }
+    } else {
+        selectElement.value = '';
+    }
+}
+
+// Add click event to toggle between dropdown and input
+function addGivenToToggleListeners() {
+    document.querySelectorAll('.editable-dropdown-container').forEach(container => {
+        const selectElement = container.querySelector('.editable-dropdown');
+        const inputElement = container.querySelector('.editable-input');
+        
+        // Click on select to show dropdown
+        selectElement.addEventListener('click', function() {
+            this.style.pointerEvents = 'auto';
+            this.style.opacity = '1';
+            inputElement.style.pointerEvents = 'none';
+            inputElement.style.opacity = '0';
+        });
+        
+        // Double-click on select to switch to input mode
+        selectElement.addEventListener('dblclick', function() {
+            this.style.pointerEvents = 'none';
+            this.style.opacity = '0.3';
+            inputElement.style.pointerEvents = 'auto';
+            inputElement.style.opacity = '1';
+            inputElement.focus();
+        });
+        
+        // Focus on input when it becomes visible
+        inputElement.addEventListener('focus', function() {
+            this.style.pointerEvents = 'auto';
+            this.style.opacity = '1';
+            selectElement.style.pointerEvents = 'none';
+            selectElement.style.opacity = '0.3';
+        });
+    });
+}
+
 // Add inline edit listeners
 function addInlineEditListeners(row) {
     const editableCells = row.querySelectorAll('[contenteditable="true"]');
@@ -1427,6 +1788,9 @@ function addInlineEditListeners(row) {
             this.style.outline = '';
         });
     });
+    
+    // Add Given To dropdown listeners
+    addGivenToToggleListeners();
 }
 
 // Handle inline edit
@@ -2643,6 +3007,10 @@ function applyDynamicFilters() {
     const searchTerm = elements.searchInput?.value.toLowerCase().trim() || '';
     const dateValue = elements.dateFilter?.value || '';
     
+    console.log('Applying dynamic filters...');
+    console.log('Search term:', searchTerm);
+    console.log('Date value:', dateValue);
+    
     // Get all dynamic filter values
     const dynamicFilterValues = {};
     const dynamicFilters = elements.dynamicFilters?.querySelectorAll('.filter-select') || [];
@@ -2652,39 +3020,145 @@ function applyDynamicFilters() {
         const value = filter.value;
         if (column && value) {
             dynamicFilterValues[column] = value;
+            console.log(`=== FILTER SELECTED ===`);
+            console.log(`Column: ${column}`);
+            console.log(`Value: "${value}"`);
+            console.log(`Value type: ${typeof value}`);
+            console.log(`Value length: ${value.length}`);
         }
     });
     
+    console.log(`=== ALL DYNAMIC FILTER VALUES ===`);
+    console.log(dynamicFilterValues);
+    
+    // Find date column dynamically
+    const dateColumn = currentSheetHeaders.find(header => 
+        header.toLowerCase().includes('date')
+    );
+    
+    console.log('Date column found:', dateColumn);
+    
+    // Apply filters to current sheet data
     filteredData = expenseData.filter(expense => {
-        // Search filter
+        // Search filter - search across all fields in current sheet
         const matchesSearch = searchTerm === '' || Object.values(expense).some(value => 
             value && value.toString().toLowerCase().includes(searchTerm)
         );
         
-        // Date filter
-        const matchesDate = dateValue === '' || expense.date === dateValue;
+        // Date filter - handle dynamic date column
+        let matchesDate = dateValue === '';
+        if (dateValue && dateColumn && expense[dateColumn]) {
+            try {
+                const expenseDate = new Date(expense[dateColumn]).toISOString().split('T')[0];
+                matchesDate = expenseDate === dateValue;
+            } catch (error) {
+                console.error('Date parsing error:', error);
+                matchesDate = false;
+            }
+        }
         
-        // Dynamic filters
+        // Dynamic filters - apply to current sheet columns with field matching
         const matchesDynamicFilters = Object.entries(dynamicFilterValues).every(([column, value]) => {
-            return expense[column] === value;
+            // Find matching field name (same logic as getUniqueValues)
+            let matchingField = column;
+            const fieldLower = column.toLowerCase().replace(/[^a-z0-9]/g, '');
+            
+            if (!currentSheetHeaders.includes(column)) {
+                // Try case-insensitive match
+                const foundHeader = currentSheetHeaders.find(header => 
+                    header.toLowerCase() === fieldLower
+                );
+                if (foundHeader) {
+                    matchingField = foundHeader;
+                } else {
+                    // Try partial match
+                    const partialMatch = currentSheetHeaders.find(header => {
+                        const headerClean = header.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        return headerClean.includes(fieldLower) || fieldLower.includes(headerClean);
+                    });
+                    if (partialMatch) {
+                        matchingField = partialMatch;
+                    } else if (expenseData.length > 0) {
+                        // Check actual data keys
+                        const dataKeys = Object.keys(expenseData[0]);
+                        const keyMatch = dataKeys.find(key => {
+                            const keyClean = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            return keyClean.includes(fieldLower) || fieldLower.includes(keyClean);
+                        });
+                        if (keyMatch) {
+                            matchingField = keyMatch;
+                        }
+                    }
+                }
+            }
+            
+            const expenseValue = expense[matchingField];
+            const match = expenseValue === value;
+            
+            console.log(`=== VALUE COMPARISON ===`);
+            console.log(`Filter column: ${column}`);
+            console.log(`Matching field: ${matchingField}`);
+            console.log(`Expense value: "${expenseValue}"`);
+            console.log(`Filter value: "${value}"`);
+            console.log(`Expense value type: ${typeof expenseValue}`);
+            console.log(`Filter value type: ${typeof value}`);
+            console.log(`Exact match: ${match}`);
+            console.log(`Trimmed match: "${expenseValue?.toString().trim()}" === "${value?.toString().trim()}" = ${expenseValue?.toString().trim() === value?.toString().trim()}`);
+            
+            if (!match && value) {
+                console.log(`❌ NO MATCH FOUND`);
+                console.log(`Expected: "${value}"`);
+                console.log(`Got: "${expenseValue}"`);
+            } else if (match) {
+                console.log(`✅ MATCH FOUND`);
+            }
+            
+            return match;
         });
         
-        return matchesSearch && matchesDate && matchesDynamicFilters;
+        const result = matchesSearch && matchesDate && matchesDynamicFilters;
+        if (!result) {
+            console.log('Expense filtered out:', expense);
+        }
+        return result;
     });
+    
+    console.log(`Filtered ${expenseData.length} records to ${filteredData.length} records`);
     
     renderTable();
     updateFilteredStatistics();
 }
 
 function clearAllFilters() {
-    searchInput.value = '';
-    statusFilter.value = '';
-    modeFilter.value = '';
-    givenToFilter.value = '';
-    dateFilter.value = '';
+    console.log('Clearing all filters...');
+    
+    // Clear search input
+    if (elements.searchInput) {
+        elements.searchInput.value = '';
+        console.log('Cleared search input');
+    }
+    
+    // Clear date filter
+    if (elements.dateFilter) {
+        elements.dateFilter.value = '';
+        console.log('Cleared date filter');
+    }
+    
+    // Clear all dynamic filters
+    const dynamicFilters = elements.dynamicFilters?.querySelectorAll('.filter-select') || [];
+    dynamicFilters.forEach(filter => {
+        filter.value = '';
+        console.log(`Cleared filter for column: ${filter.getAttribute('data-column')}`);
+    });
+    
+    // Clear filtered data and reset to show all current sheet data
     filteredData = [];
+    console.log('Cleared filtered data');
+    
     renderTable();
     updateStatistics();
+    
+    console.log('All filters cleared successfully');
 }
 
 function updateFilteredStatistics() {

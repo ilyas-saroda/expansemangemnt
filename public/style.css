@@ -1012,6 +1012,71 @@ body {
     }
 }
 
+/* Editable Dropdown Styles */
+.editable-dropdown-container {
+    position: relative;
+    width: 100%;
+    min-width: 120px;
+}
+
+.editable-dropdown {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.editable-dropdown:focus {
+    outline: none;
+    border-color: #2196F3;
+    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+.editable-dropdown:hover {
+    border-color: #2196F3;
+}
+
+.editable-input {
+    padding: 6px 10px;
+    border: 2px solid #2196F3;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+    transition: all 0.2s ease;
+}
+
+.editable-input:focus {
+    outline: none;
+    border-color: #2196F3;
+    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+/* Visual feedback for dropdown/input states */
+.editable-dropdown:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.editable-input:focus {
+    z-index: 10;
+}
+
+/* Container hover effects */
+.editable-dropdown-container:hover .editable-dropdown {
+    border-color: #2196F3;
+}
+
+/* Animation for smooth transitions */
+.editable-dropdown,
+.editable-input {
+    transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Print styles - hide input controls during printing */
 @media print {
     body {
         background: white;
@@ -1024,5 +1089,16 @@ body {
     
     .autocomplete-suggestions {
         display: none !important;
+    }
+    
+    .editable-dropdown-container .editable-input {
+        display: none !important;
+    }
+    
+    .editable-dropdown {
+        border: none !important;
+        background: transparent !important;
+        color: black !important;
+        pointer-events: none !important;
     }
 }
